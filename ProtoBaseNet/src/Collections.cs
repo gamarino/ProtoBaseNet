@@ -1,47 +1,39 @@
 namespace ProtoBaseNet
 {
-    public abstract class DBCollections : Atom
+    public abstract class Index : Atom
     {
-        public int Count { get; set; } = 0;
-        public object Indexes { get; set; } // Dictionary in python
-
-        public DBCollections(object indexes = null, ObjectTransaction transaction = null,
-            AtomPointer atomPointer = null)
-            : base(transaction, atomPointer)
+        public void Add2Index(object? item)
         {
-            Indexes = indexes;
+            throw new NotImplementedException();    
+        }
+        
+        public void RemoveFromIndex(object? item)
+        {
+            throw new NotImplementedException();
         }
 
-        public virtual DBCollections IndexAdd(object item) => this;
-        public virtual DBCollections IndexRemove(object item) => this;
-
-        public void Add2Indexes(object item)
+        public Index GetEmpty()
         {
+            throw new NotImplementedException();
         }
+        
+    }
+    
+    
+    public abstract class Collections : Atom
+    {
+        public int Count { get; } = 0;
+        internal DbDictionary<Index>? Indexes { get; set; } // Dictionary in python
 
-        public void RemoveFromIndexes(object item)
-        {
-        }
+        public virtual Collections IndexAdd(string attributeName, Index newIndex) => this;
+        public virtual Collections IndexRemove(string attributeName) => this;
 
-        public abstract QueryPlan AsQueryPlan();
+        public Collections? Optimize() => null;
+        public Collections? ReIndex() => null;
+        public Collections? Execute(string attributeName) => null;
+        
+        public Collections? ConcurrentUpdate(Collections previousCollection) => null;
+        
     }
 
-    public abstract class QueryPlan : Atom
-    {
-        public QueryPlan BasedOn { get; set; }
-
-        protected QueryPlan(QueryPlan basedOn = null, ObjectTransaction transaction = null,
-            AtomPointer atomPointer = null)
-            : base(transaction, atomPointer)
-        {
-            BasedOn = basedOn;
-        }
-
-        public abstract DBCollections Execute();
-        public abstract QueryPlan Optimize();
-        public virtual int GetCardinalityEstimate() => int.MaxValue;
-        public virtual float GetCostEstimate() => float.PositiveInfinity;
-        public virtual int Count() => 0;
-        public virtual object Explain() => new { };
-    }
 }

@@ -3,17 +3,20 @@ using System.Threading.Tasks;
 
 namespace ProtoBaseNet
 {
-    public interface IConcurrentOptimized
-    {
-        Atom RebaseOnConcurrentUpdate(Atom currentDbObject);
-    }
-
-    public abstract class AbstractSharedStorage
+    public abstract class SharedStorage
     {
         public abstract Task<AtomPointer> PushAtom(Atom atom);
         public abstract Task<Atom> GetAtom(AtomPointer atomPointer);
         public abstract Task<byte[]> GetBytes(AtomPointer atomPointer);
         public abstract Task<AtomPointer> PushBytes(byte[] data);
+
+        public abstract IDisposable RootContextManager();
+        public abstract AtomPointer ReadCurrentRoot();
+        public abstract void SetCurrentRoot(AtomPointer newRootPointer);
+
+        public abstract void FlushWal();
+        public abstract void Close();
+        
     }
 
     public abstract class BlockProvider

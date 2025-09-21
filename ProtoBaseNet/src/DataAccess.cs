@@ -3,16 +3,6 @@ using System.Threading.Tasks;
 
 namespace ProtoBaseNet
 {
-    public abstract class SharedStorage : AbstractSharedStorage
-    {
-        public abstract IDisposable RootContextManager();
-        public abstract AtomPointer ReadCurrentRoot();
-        public abstract void SetCurrentRoot(AtomPointer newRootPointer);
-
-        public abstract void FlushWal();
-        public abstract void Close();
-    }
-
     internal sealed class SpaceContextManager : IDisposable
     {
         private readonly object _gate;
