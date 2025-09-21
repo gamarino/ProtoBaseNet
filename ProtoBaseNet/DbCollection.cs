@@ -20,20 +20,23 @@ namespace ProtoBaseNet
     }
     
     
-    public abstract class Collections : Atom
+    public abstract class DbCollection : Atom
     {
         public int Count { get; } = 0;
         internal DbDictionary<Index>? Indexes { get; set; } // Dictionary in python
 
-        public virtual Collections IndexAdd(string attributeName, Index newIndex) => this;
-        public virtual Collections IndexRemove(string attributeName) => this;
+        public virtual DbCollection IndexAdd(string attributeName, Index newIndex) => this;
+        public virtual DbCollection IndexRemove(string attributeName) => this;
 
-        public Collections? Optimize() => null;
-        public Collections? ReIndex() => null;
-        public Collections? Execute(string attributeName) => null;
+        public DbCollection? ConcurrentUpdate(DbCollection previousDbCollection) => null;
         
-        public Collections? ConcurrentUpdate(Collections previousCollection) => null;
-        
+    }
+
+    public abstract class QueryPlan : DbCollection
+    {
+        public DbCollection Optimize() => this;
+        public DbCollection ReIndex() => this;
+        public DbCollection? Execute() => null;
     }
 
 }
