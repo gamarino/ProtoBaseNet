@@ -133,6 +133,16 @@ namespace ProtoBaseNet
             EnclosingTransaction = enclosingTransaction;
         }
 
+        public SharedStorage Storage { get; protected set; }
+        public DbLiteral GetLiteral(string value) => new DbLiteral(value);
+        public Atom ReadObject(string className, AtomPointer atomPointer) => null;
+
+        public void UpdateCreatedLiterals(ObjectTransaction transaction, object newLiterals)
+        {
+        }
+
+        public object NewLiterals; // placeholder
+
         public void Commit()
         {
         }

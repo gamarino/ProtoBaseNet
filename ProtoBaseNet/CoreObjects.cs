@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 
 namespace ProtoBaseNet
 {
@@ -18,37 +19,78 @@ namespace ProtoBaseNet
         }
     }
 
-    public class DBObject : Atom
+    public class DbObject : Atom
     {
-        public DBObject(ObjectTransaction? transaction = null, AtomPointer? atomPointer = null, params object[] kwargs)
+        protected DbDictionary<object>? Attributes = new DbDictionary<object>();
+        
+        public DbObject(DbDictionary<object> attributes, ObjectTransaction? transaction = null, AtomPointer? atomPointer = null, params object[] kwargs)
             : base(transaction, atomPointer)
 
         {
-            // handle kwargs
+            Attributes = attributes;
+        }
+        
+        public DbObject(ObjectTransaction? transaction = null, AtomPointer? atomPointer = null, params object[] kwargs)
+            : base(transaction, atomPointer)
+
+        {
+            Attributes = null;
         }
 
-        public DBObject SetAt(string name, object value)
+        public virtual object GetAt(string name)
+        {
+            return Attributes.GetAt(name);
+        }
+
+        public virtual DbObject SetAt(string name, object value)
         {
             // ...
-            return new DBObject();
+            return new DbObject(
+                Attributes.SetAt(name, value),
+                Transaction,
+                AtomPointer);
+        }
+
+        public virtual bool HasDefinedAttr(string name)
+        {
+            Attributes.Has(name);
+        }
+    }
+
+    public class MutableObject : DbObject
+    {
+        public int HashKey { get; }
+
+        public MutableObject(int hashKey = 0, ObjectTransaction transaction = null, AtomPointer atomPointer = null)
+            : base(null, transaction, atomPointer)
+        {
+            HashKey = hashKey == 0 ? Guid.NewGuid().GetHashCode() : hashKey;
+        }
+
+        public object GetAt(string name)
+        {
+            DbHashDictionary<object> mutables = this.Transaction.GetMutables();
+            DbObject currentValue = mutables.GetAt(HashKey);
+            if (currentValue == null) return null;
+            return currentValue.GetAt(name);
+        }
+
+        public DbObject SetAt(string name, object value)
+        {
+            DbHashDictionary<object> mutables = this.Transaction.GetMutables();
+            DbObject currentValue = mutables.GetAt(HashKey);
+            if (currentValue == null) throw new Exception("Mutable object not found!");
+            currentValue = currentValue.SetAt(name, value);
+            mutables = mutables.SetAt(HashKey, currentValue);
+            this.Transaction.SetMutables(mutables);
+            return this;
         }
 
         public bool HasDefinedAttr(string name)
         {
-            // ...
-            return false;
+            Attributes.Has(name);
         }
-    }
 
-    public class MutableObject : Atom
-    {
-        public int HashKey { get; set; }
-
-        public MutableObject(int hashKey = 0, ObjectTransaction transaction = null, AtomPointer atomPointer = null)
-            : base(transaction, atomPointer)
-        {
-            HashKey = hashKey == 0 ? Guid.NewGuid().GetHashCode() : hashKey;
-        }
     }
 
     public class Literal : Atom
