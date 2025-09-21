@@ -3,16 +3,28 @@ namespace ProtoBaseNet;
 using System;
 using System.Collections.Generic;
 
+// Persistent, immutable hash dictionary implemented as an AVL-like binary search tree over integer keys.
+// Key properties:
+// - Structural sharing: mutation methods (SetAt/RemoveAt/Merge) return new trees, reusing unchanged subtrees.
+// - Balanced height: rotations keep operations O(log N) for lookup/insert/remove.
+// - In-order traversal via AsIterable yields entries sorted by integer key.
 public class DbHashDictionary<T> : DbCollection
 {
+    // Node key; null denotes an empty/sentinel node.
     public int? Key { get; init; }
+    // Node value (only meaningful if Key != null).
     public T? Value { get; init; }
+    // Cached subtree height (0 for empty).
     public int Height { get; init; }
+    // Right child (keys greater than Key).
     public DbHashDictionary<T>? Next { get; init; }
+    // Left child (keys less than Key).
     public DbHashDictionary<T>? Previous { get; init; }
 
+    // Cached number of nodes in the subtree (0 for empty).
     public int Count { get; init; }
 
+    // Constructs a node and computes derived attributes (Count/Height) from children.
     public DbHashDictionary(
         int? key = null,
         T? value = default,
@@ -48,6 +60,7 @@ public class DbHashDictionary<T> : DbCollection
         }
     }
 
+    // In-order traversal of (key, value) pairs.
     public IEnumerable<(int key, T? value)> AsIterable()
     {
         foreach (var kv in Scan(this))
@@ -70,6 +83,7 @@ public class DbHashDictionary<T> : DbCollection
         }
     }
 
+    // O(log N) lookup; returns default(T) if key is not present.
     public T? GetAt(int key)
     {
         if (Key is null) return default;
@@ -85,6 +99,7 @@ public class DbHashDictionary<T> : DbCollection
         return default;
     }
 
+    // Membership test in O(log N).
     public bool Has(int key)
     {
         if (Key is null) return false;
@@ -100,6 +115,7 @@ public class DbHashDictionary<T> : DbCollection
         return false;
     }
 
+    // Balance factor (rightHeight - leftHeight). Used to select rotations.
     private int BalanceFactor()
     {
         if (Key is null) return 0;
@@ -108,6 +124,7 @@ public class DbHashDictionary<T> : DbCollection
         return hR - hL;
     }
 
+    // Single right rotation. Returns new subtree root.
     private DbHashDictionary<T> RightRotation()
     {
         if (Previous is null) return this;
@@ -127,6 +144,7 @@ public class DbHashDictionary<T> : DbCollection
         );
     }
 
+    // Single left rotation. Returns new subtree root.
     private DbHashDictionary<T> LeftRotation()
     {
         if (Next is null) return this;
@@ -146,6 +164,7 @@ public class DbHashDictionary<T> : DbCollection
         );
     }
 
+    // Rebalance by rebalancing heavy children and applying single/double rotations as needed.
     private DbHashDictionary<T> Rebalance()
     {
         var node = this;
@@ -174,6 +193,7 @@ public class DbHashDictionary<T> : DbCollection
 
         if (balance < -1)
         {
+            // Left-heavy: rotate left child right if it is right-heavy, then rotate right.
             if (node.Previous is not null && node.Previous.BalanceFactor() > 0)
             {
                 node = new DbHashDictionary<T>(
@@ -188,6 +208,7 @@ public class DbHashDictionary<T> : DbCollection
 
         if (balance > 1)
         {
+            // Right-heavy: rotate right child left if it is left-heavy, then rotate left.
             if (node.Next is not null && node.Next.BalanceFactor() < 0)
             {
                 node = new DbHashDictionary<T>(
@@ -203,6 +224,7 @@ public class DbHashDictionary<T> : DbCollection
         return node;
     }
 
+    // Inserts or updates (key, value) and returns a rebalanced tree.
     public DbHashDictionary<T> SetAt(int key, T? value)
     {
         if (Key is null)
@@ -260,6 +282,7 @@ public class DbHashDictionary<T> : DbCollection
         }
         else
         {
+            // Replace value at existing key.
             newNode = new DbHashDictionary<T>(
                 key: Key,
                 value: value,
@@ -271,6 +294,7 @@ public class DbHashDictionary<T> : DbCollection
         return newNode.Rebalance();
     }
 
+    // Removes a key if present and returns a rebalanced tree.
     public DbHashDictionary<T> RemoveAt(int key)
     {
         if (Key is null) return this;
@@ -292,6 +316,7 @@ public class DbHashDictionary<T> : DbCollection
             }
             else
             {
+                // Key not found right; return left subtree or this if none.
                 if (Previous is not null) { }
                 return Previous ?? this;
             }
@@ -310,12 +335,14 @@ public class DbHashDictionary<T> : DbCollection
             }
             else
             {
+                // Key not found left; return right subtree or this if none.
                 if (Next is not null) { }
                 return Next ?? this;
             }
         }
         else
         {
+            // Remove this node by promoting successor or predecessor.
             if (Next is not null)
             {
                 var first = Next.GetFirst();
@@ -350,6 +377,7 @@ public class DbHashDictionary<T> : DbCollection
             }
             else
             {
+                // Leaf -> empty.
                 return new DbHashDictionary<T>();
             }
         }
@@ -357,6 +385,8 @@ public class DbHashDictionary<T> : DbCollection
         return newNode.Rebalance();
     }
 
+    // Merges another dictionary by applying SetAt for each entry.
+    // Note: right-hand values overwrite left-hand values on key collision.
     public DbHashDictionary<T> Merge(DbHashDictionary<T> other)
     {
         var result = this;
@@ -365,6 +395,7 @@ public class DbHashDictionary<T> : DbCollection
         return result;
     }
 
+    // Smallest (leftmost) entry, or null if empty.
     public (int key, T? value)? GetFirst()
     {
         if (Key is null) return null;
@@ -378,6 +409,7 @@ public class DbHashDictionary<T> : DbCollection
         throw new ProtoCorruptionException("get_first traversal inconsistency");
     }
 
+    // Largest (rightmost) entry, or null if empty.
     public (int key, T? value)? GetLast()
     {
         if (Key is null) return null;
