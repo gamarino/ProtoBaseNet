@@ -110,9 +110,9 @@ namespace ProtoBaseNet
                     if (databases == null || !databases.Has(databaseName))
                     {
                         var newDatabases = databases.SetAt(databaseName, new DbDictionary<object>(updateTr));
-                        var newRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
+                        var newSpaceRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
-                        var newHistory = spaceHistory.InsertAt(0, newRoot);
+                        var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
                         newHistory.Transaction = updateTr;
                         newHistory.Save();
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
@@ -158,9 +158,9 @@ namespace ProtoBaseNet
                         var database = databases.GetAt(oldName);
                         var tempDatabases = databases.RemoveAt(oldName);
                         var newDatabases = tempDatabases.SetAt(newName, database!);
-                        var newRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
+                        var newSpaceRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
-                        var newHistory = spaceHistory.InsertAt(0, newRoot);
+                        var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
                         newHistory.Transaction = updateTr;
                         newHistory.Save();
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
@@ -198,9 +198,9 @@ namespace ProtoBaseNet
                     if (databases != null && databases.Has(name))
                     {
                         var newDatabases = databases.RemoveAt(name);
-                        var newRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
+                        var newSpaceRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
-                        var newHistory = spaceHistory.InsertAt(0, newRoot);
+                        var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
                         newHistory.Transaction = updateTr;
                         newHistory.Save();
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);

@@ -59,6 +59,10 @@ namespace ProtoBaseNet
     /// </remarks>
     public abstract class Atom
     {
+        private static readonly Dictionary<AtomPointer, WeakReference<Atom>> _cache = new();
+        private static int _cacheAccessCount = 0;
+        private const int CacheCleanThreshold = 1000;
+
         /// <summary>
         /// Gets or sets the pointer to the atom's data in storage. May be null before the first save.
         /// </summary>
@@ -76,6 +80,46 @@ namespace ProtoBaseNet
         {
             Transaction = transaction;
             AtomPointer = atomPointer;
+        }
+
+        private static void CleanCache()
+        {
+            var deadKeys = new List<AtomPointer>();
+            foreach (var (key, weakRef) in _cache)
+            {
+                if (!weakRef.TryGetTarget(out _))
+                {
+                    deadKeys.Add(key);
+                }
+            }
+            foreach (var key in deadKeys)
+            {
+                _cache.Remove(key);
+            }
+        }
+
+        internal static Atom? GetFromCache(AtomPointer pointer)
+        {
+            _cacheAccessCount++;
+            if (_cacheAccessCount > CacheCleanThreshold)
+            {
+                CleanCache();
+                _cacheAccessCount = 0;
+            }
+
+            if (_cache.TryGetValue(pointer, out var weakRef) && weakRef.TryGetTarget(out var atom))
+            {
+                return atom;
+            }
+            return null;
+        }
+
+        internal static void AddToCache(Atom atom)
+        {
+            if (atom.AtomPointer != null)
+            {
+                _cache[atom.AtomPointer] = new WeakReference<Atom>(atom);
+            }
         }
         
         protected virtual void SetDynamicAttribute(string attributeName, object value) => throw new MissingFieldException();
