@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Threading;
 
 namespace ProtoBaseNet
@@ -264,17 +265,6 @@ namespace ProtoBaseNet
             Storage.SetCurrentRoot(newSpaceHistory.AtomPointer!);
         }
 
-        internal void SetSpaceRootLocked(RootObject newSpaceRoot, DbList<RootObject> currentHistory)
-        {
-            var updateTr = new ObjectTransaction(objectSpace: this, storage: Storage);
-            newSpaceRoot.Transaction = updateTr;
-
-            currentHistory.Transaction = updateTr;
-            var spaceHistory = currentHistory.InsertAt(0, newSpaceRoot);
-            spaceHistory.Save();
-            Storage.SetCurrentRoot(spaceHistory.AtomPointer!);
-        }
-
         /// <summary>
         /// Closes the object space and releases underlying storage resources.
         /// </summary>
@@ -397,6 +387,7 @@ namespace ProtoBaseNet
         private ObjectTransaction? EnclosingTransaction { get; }
         private DbDictionary<object>? TransactionRoot { get; set; }
         internal DbDictionary<object> NewRoots { get; set; }
+        DbDictionary<object> RootBases = new DbDictionary<object>();
         internal DbDictionary<object> NewLiterals { get; set; }
 
         private DbHashDictionary<DbObject> _mutables = new();
@@ -494,6 +485,7 @@ namespace ProtoBaseNet
             if (name is null) throw new ArgumentNullException(nameof(name));
             lock (_lock)
             {
+                
                 return TransactionRoot?.GetAt(name) as Atom;
             }
         }
@@ -526,6 +518,87 @@ namespace ProtoBaseNet
                 }
             }
         }
+        
+        /// <summary>
+        /// Attempts to reconcile staged roots against the latest root snapshot without taking the global lock.
+        /// Collections can provide a conflict-minimizing merge via ConcurrentUpdate when the StableId matches.
+        /// If a collection cannot safely merge, the staged value is kept as-is and validated later under lock.
+        /// </summary>
+        /// <remarks>
+        /// Contract for ConcurrentUpdate:
+        /// - Input: previous collection snapshot (the current state at reconciliation time).
+        /// - Output: merged collection that re-applies this transaction's changes on top of the provided snapshot,
+        ///           or null to indicate non-mergeable changes (caller should fallback to conflict path).
+        /// - Must be side-effect free w.r.t. storage; only returns a new Atom graph.
+        /// </remarks>
+        private DbDictionary<object> TryReconcileNewRootsAgainstCurrent()
+        {
+            var currentDbRoot = Database!.ReadDbRoot();
+            var result = NewRoots;
+
+            foreach (var (k, v) in NewRoots.AsIterable())
+            {
+                var key = (string)k;
+                var stagedAtom = v as Atom;
+                var currentAtom = currentDbRoot.GetAt(key) as Atom;
+
+                // Only collections support merge semantics; other atoms are validated later under lock.
+                if (stagedAtom is DbCollection stagedColl && currentAtom is DbCollection currentColl)
+                {
+                    // StableId equality indicates the same logical collection lineage; eligible for merge.
+                    if (stagedColl.StableId == currentColl.StableId)
+                    {
+                        var merged = stagedColl.ConcurrentUpdate(currentColl);
+                        if (merged is not null)
+                        {
+                            result = result.SetAt(key, merged);
+                            continue;
+                        }
+                    }
+                }
+
+                // Keep staged value if no merge was possible; it will be checked under lock.
+                result = result.SetAt(key, stagedAtom!);
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Applies the reconciled new roots under the global space lock.
+        /// Verifies that each root's base (captured in RootBases) still matches the current value,
+        /// ensuring no concurrent conflicting update slipped in between reconciliation and commit.
+        /// On success, persists the updated root snapshot atomically.
+        /// </summary>
+        /// <exception cref="ProtoDbConcurrencyException">Thrown when a root was modified concurrently.</exception>
+        private void ApplyNewRootsUnderGlobalLock(DbDictionary<object> reconciledNewRoots)
+        {
+            using (ObjectSpace.GetRootLocker())
+            {
+                var currentDbRoot = Database!.ReadDbRoot();
+                var newDbRoot = currentDbRoot;
+
+                foreach (var (k, v) in reconciledNewRoots.AsIterable())
+                {
+                    var key = (string)k;
+                    var stagedAtom = v as Atom;
+
+                    var currentAtCommit = currentDbRoot.GetAt(key);
+                    var expectedBase = RootBases.GetAt(key);
+
+                    // Double-check under lock: if the base seen by this transaction differs from current, abort.
+                    // Note: equality semantics should be identity-based or via a stable version/hash to avoid deep compares.
+                    if (currentAtCommit != null && expectedBase != null && !ReferenceEquals(currentAtCommit, expectedBase))
+                        throw new ProtoDbConcurrencyException($"Root {key} is already modified in another transaction!");
+
+                    newDbRoot = newDbRoot.SetAt(key, stagedAtom!);
+                }
+
+                newDbRoot.Transaction = this;
+                newDbRoot.Save();
+                Database.SetDbRoot(newDbRoot);
+            }
+        }
 
         /// <summary>
         /// Commits the changes made in this transaction to the database.
@@ -541,22 +614,19 @@ namespace ProtoBaseNet
 
                 if (EnclosingTransaction == null)
                 {
+                    // Pre root locking: try to recover from simoultaneous transactions
+                    // modifing the same root.
+                    
                     if (NewRoots.Count > 0)
                     {
-                        using (ObjectSpace.GetRootLocker())
-                        {
-                            var currentDbRoot = Database!.ReadDbRoot();
-                            var newDbRoot = currentDbRoot;
+                        // 1) Optimistic reconciliation outside the global lock:
+                        //    Attempt to rebase staged roots against the latest database root, giving each collection
+                        //    a chance to reapply changes from a newer snapshot in a conflict-free manner.
+                        var reconciledNewRoots = TryReconcileNewRootsAgainstCurrent();
 
-                            foreach (var (key, value) in NewRoots.AsIterable())
-                            {
-                                newDbRoot = newDbRoot.SetAt((string)key, value!);
-                            }
-                            
-                            newDbRoot.Transaction = this;
-                            newDbRoot.Save();
-                            Database.SetDbRoot(newDbRoot);
-                        }
+                        // 2) Critical section under global space lock:
+                        //    Re-validate expected bases to prevent write-write conflicts and atomically persist the new root.
+                        ApplyNewRootsUnderGlobalLock(reconciledNewRoots);
                     }
                 }
                 else

@@ -29,10 +29,11 @@ public class DbCountedSet<T> : DbCollection
     public DbCountedSet(
         DbDictionary<T> items,
         DbDictionary<int> counts,
+        Guid? collectionId = null,
         ObjectTransaction? transaction = null,
         AtomPointer? atomPointer = null,
         DbDictionary<Index>? indexes = null)
-        : base(transaction, atomPointer)
+        : base(collectionId, indexes, transaction, atomPointer)
     {
         _items = items;
         _counts = counts;
@@ -79,7 +80,7 @@ public class DbCountedSet<T> : DbCollection
         var currentCount = GetCount(key);
         var newItems = _items.SetAt(h, key);
         var newCounts = _counts.SetAt(h, currentCount + 1);
-        return new DbCountedSet<T>(newItems, newCounts, Transaction, AtomPointer, Indexes);
+        return new DbCountedSet<T>(newItems, newCounts, StableId, Transaction, AtomPointer, Indexes);
     }
 
     public DbCountedSet<T> RemoveAt(T key)
@@ -101,7 +102,7 @@ public class DbCountedSet<T> : DbCollection
             newCounts = newCounts.SetAt(h, currentCount - 1);
         }
         
-        return new DbCountedSet<T>(newItems, newCounts, Transaction, AtomPointer, Indexes);
+        return new DbCountedSet<T>(newItems, newCounts, StableId, Transaction, AtomPointer, Indexes);
     }
 
     private object HashOf(T key)

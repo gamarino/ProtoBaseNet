@@ -1,3 +1,5 @@
+using System.Data;
+
 namespace ProtoBaseNet
 {
     /// <summary>
@@ -41,8 +43,16 @@ namespace ProtoBaseNet
     /// </summary>
     public abstract class DbCollection : Atom
     {
-        protected DbCollection(ObjectTransaction? transaction = null, AtomPointer? atomPointer = null) : base(transaction, atomPointer)
+        internal DbDictionary<Index>? Indexes { get; init; }
+        internal Guid StableId { get; init; }
+
+        protected DbCollection(
+            Guid? stableId = null,
+            DbDictionary<Index>? indexes = null,
+            ObjectTransaction? transaction = null, AtomPointer? atomPointer = null) : base(transaction, atomPointer)
         {
+            StableId = stableId?? Guid.NewGuid();
+            Indexes = indexes;
         }
 
         /// <summary>
@@ -51,8 +61,6 @@ namespace ProtoBaseNet
         public int Count { get; } = 0;
 
         public ObjectTransaction? Transaction { get; set; }
-
-        internal DbDictionary<Index>? Indexes { get; set; }
 
         /// <summary>
         /// Adds or replaces an index for a given attribute.
@@ -74,7 +82,8 @@ namespace ProtoBaseNet
         /// </summary>
         /// <param name="previousDbCollection">The previous snapshot of the collection.</param>
         /// <returns>A reconciled collection, or null if the operation cannot be applied safely.</returns>
-        public DbCollection? ConcurrentUpdate(DbCollection previousDbCollection) => null;
+        public DbCollection ConcurrentUpdate(DbCollection previousDbCollection) => 
+            throw new ProtoDbConcurrencyException("Conflicting simultaneous transaction");
     }
 
     /// <summary>

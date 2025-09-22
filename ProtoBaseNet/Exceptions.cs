@@ -35,3 +35,19 @@ public class ProtoCorruptionException : Exception
     /// <param name="message">The message that describes the error.</param>
     public ProtoCorruptionException(string message) : base(message) { }
 }
+
+/// <summary>
+/// The exception that is thrown when the same root is updated by simoultaneous transactions
+/// </summary>
+/// <remarks>
+/// Typical use cases:
+/// - Root value is updated by multiple transactions and there is no possibility to resolve the conflict.
+/// </remarks>
+public class ProtoDbConcurrencyException : Exception
+{
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProtoDbConcurrencyException"/> class with a specified error message.
+    /// </summary>
+    /// <param name="message">The message that describes the error.</param>
+    public ProtoDbConcurrencyException(string message) : base(message) { }
+}
