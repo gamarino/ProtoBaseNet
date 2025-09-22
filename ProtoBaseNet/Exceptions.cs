@@ -1,18 +1,6 @@
 namespace ProtoBaseNet;
 
 /// <summary>
-/// A legacy placeholder container for exceptions.
-/// </summary>
-/// <remarks>This class is not used in typical flows. Prefer throwing concrete exception types.</remarks>
-public class Exceptions
-{
-    /// <summary>
-    /// Gets or sets a human-readable message describing the error condition.
-    /// </summary>
-    public string Message { get; set; }
-}
-
-/// <summary>
 /// The exception that is thrown when input data, state preconditions, or API contracts are violated.
 /// </summary>
 /// <remarks>

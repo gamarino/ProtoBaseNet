@@ -41,10 +41,16 @@ namespace ProtoBaseNet
     /// </summary>
     public abstract class DbCollection : Atom
     {
+        protected DbCollection(ObjectTransaction? transaction = null, AtomPointer? atomPointer = null) : base(transaction, atomPointer)
+        {
+        }
+
         /// <summary>
         /// Gets the logical item count of the collection.
         /// </summary>
         public int Count { get; } = 0;
+
+        public ObjectTransaction? Transaction { get; set; }
 
         internal DbDictionary<Index>? Indexes { get; set; }
 

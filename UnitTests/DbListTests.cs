@@ -1,4 +1,3 @@
-
 using NUnit.Framework;
 using ProtoBaseNet;
 using System.Collections.Generic;
@@ -22,20 +21,20 @@ namespace MainTests
             var items = new List<int> { 1, 2, 3 };
             var list = new DbList<int>(items);
             Assert.That(list.Count, Is.EqualTo(3));
-            Assert.That(list.Get(0), Is.EqualTo(1));
-            Assert.That(list.Get(1), Is.EqualTo(2));
-            Assert.That(list.Get(2), Is.EqualTo(3));
+            Assert.That(list.GetAt(0), Is.EqualTo(1));
+            Assert.That(list.GetAt(1), Is.EqualTo(2));
+            Assert.That(list.GetAt(2), Is.EqualTo(3));
         }
 
         [Test]
         public void AppendItem()
         {
             var list = new DbList<int>();
-            var newList = list.Append(10);
+            var newList = list.AppendLast(10);
 
             Assert.That(list.Count, Is.EqualTo(0)); // Original list is immutable
             Assert.That(newList.Count, Is.EqualTo(1));
-            Assert.That(newList.Get(0), Is.EqualTo(10));
+            Assert.That(newList.GetAt(0), Is.EqualTo(10));
         }
 
         [Test]
@@ -43,10 +42,10 @@ namespace MainTests
         {
             var items = new List<int> { 1, 2, 3 };
             var list = new DbList<int>(items);
-            var newList = list.Set(1, 99);
+            var newList = list.SetAt(1, 99);
 
-            Assert.That(list.Get(1), Is.EqualTo(2)); // Original list is immutable
-            Assert.That(newList.Get(1), Is.EqualTo(99));
+            Assert.That(list.GetAt(1), Is.EqualTo(2)); // Original list is immutable
+            Assert.That(newList.GetAt(1), Is.EqualTo(99));
             Assert.That(newList.Count, Is.EqualTo(3));
         }
 
@@ -55,12 +54,12 @@ namespace MainTests
         {
             var items = new List<int> { 1, 2, 3 };
             var list = new DbList<int>(items);
-            var newList = list.Delete(1);
+            var newList = list.RemoveAt(1);
 
             Assert.That(list.Count, Is.EqualTo(3)); // Original list is immutable
             Assert.That(newList.Count, Is.EqualTo(2));
-            Assert.That(newList.Get(0), Is.EqualTo(1));
-            Assert.That(newList.Get(1), Is.EqualTo(3));
+            Assert.That(newList.GetAt(0), Is.EqualTo(1));
+            Assert.That(newList.GetAt(1), Is.EqualTo(3));
         }
 
         [Test]
@@ -68,7 +67,7 @@ namespace MainTests
         {
             var items = new List<int> { 1, 2, 3 };
             var list = new DbList<int>(items);
-            var nativeList = list.ToList();
+            var nativeList = list.AsIterable().ToList();
             Assert.That(nativeList, Is.EqualTo(items));
         }
     }

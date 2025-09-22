@@ -108,11 +108,11 @@ namespace ProtoBaseNet
                     var databases = currentRoot.ObjectRoot as DbDictionary<object>;
                     if (databases == null || !databases.Has(databaseName))
                     {
-                        databases ??= new DbDictionary<object>(updateTr);
                         var newDatabases = databases.SetAt(databaseName, new DbDictionary<object>(updateTr));
                         var newRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newRoot);
+                        newHistory.Transaction = updateTr;
                         newHistory.Save();
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
 
@@ -156,15 +156,11 @@ namespace ProtoBaseNet
                     {
                         var database = databases.GetAt(oldName);
                         var tempDatabases = databases.RemoveAt(oldName);
-                        if (tempDatabases.Has(newName))
-                        {
-                            throw new ProtoValidationException($"Database {newName} already exists!");
-                        }
-
                         var newDatabases = tempDatabases.SetAt(newName, database!);
                         var newRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newRoot);
+                        newHistory.Transaction = updateTr;
                         newHistory.Save();
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
                     }
@@ -204,6 +200,7 @@ namespace ProtoBaseNet
                         var newRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newRoot);
+                        newHistory.Transaction = updateTr;
                         newHistory.Save();
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
                     }
@@ -232,12 +229,16 @@ namespace ProtoBaseNet
 
             if (rootPointer is not null)
             {
-                var spaceHistory = new DbList<RootObject>(readTr, rootPointer);
+                var spaceHistory = new DbList<RootObject>();
+                spaceHistory.Transaction = readTr;
+                spaceHistory.AtomPointer = rootPointer;
                 spaceHistory.Load();
                 return spaceHistory;
             }
 
-            return new DbList<RootObject>(readTr);
+            var emptyHistory = new DbList<RootObject>();
+            emptyHistory.Transaction = readTr;
+            return emptyHistory;
         }
 
         internal RootObject GetSpaceRoot()
@@ -397,10 +398,58 @@ namespace ProtoBaseNet
         private DbDictionary<object>? TransactionRoot { get; set; }
         internal DbDictionary<object> NewRoots { get; set; }
         internal DbDictionary<object> NewLiterals { get; set; }
+
+        private DbHashDictionary<DbObject> _mutables = new();
+        private readonly Dictionary<string, Literal> _literals = new();
         
         private Database? Database { get; }
         private ObjectSpace ObjectSpace { get; }
         internal SharedStorage Storage { get; }
+
+        internal DbHashDictionary<DbObject> GetMutables()
+        {
+            return _mutables;
+        }
+
+        internal void SetMutables(DbHashDictionary<DbObject> mutables)
+        {
+            _mutables = mutables;
+        }
+
+        internal Atom ReadObject(string className, AtomPointer ap)
+        {
+            var type = Type.GetType(className) ?? 
+                AppDomain.CurrentDomain.GetAssemblies()
+                    .Select(a => a.GetType(className))
+                    .FirstOrDefault(t => t != null);
+
+            if (type == null) throw new ProtoValidationException($"Could not find type {className}");
+
+            var atom = (Atom)Activator.CreateInstance(type)!;
+            atom.AtomPointer = ap;
+            atom.Transaction = this;
+            atom.Load();
+            return atom;
+        }
+
+        internal Literal GetLiteral(string value)
+        {
+            if (_literals.TryGetValue(value, out var literal))
+            {
+                return literal;
+            }
+
+            literal = new Literal(value) { Transaction = this };
+            literal.Save();
+            _literals[value] = literal;
+            return literal;
+        }
+
+        internal void UpdateCreatedLiterals(ObjectTransaction transaction, DbDictionary<object> newLiterals)
+        {
+            // This method seems to be intended to save literals created in a transaction.
+            // The current implementation of GetLiteral already saves the literal, so this might be redundant.
+        }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ObjectTransaction"/> class.
@@ -445,7 +494,7 @@ namespace ProtoBaseNet
             if (name is null) throw new ArgumentNullException(nameof(name));
             lock (_lock)
             {
-                return TransactionRoot?.GetAt(name);
+                return TransactionRoot?.GetAt(name) as Atom;
             }
         }
 

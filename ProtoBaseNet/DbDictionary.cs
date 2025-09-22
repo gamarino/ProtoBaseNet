@@ -85,6 +85,31 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
     /// </summary>
     public new int Count => _content.Count;
 
+    public DbDictionary()
+    {
+    }
+
+    public DbDictionary(ObjectTransaction transaction)
+    {
+        Transaction = transaction;
+    }
+
+    public DbDictionary(IEnumerable<KeyValuePair<object, T>> items)
+    {
+        var newContent = new List<DictionaryItem>();
+        foreach (var item in items)
+        {
+            newContent.Add(new DictionaryItem(item.Key, item.Value));
+        }
+        newContent.Sort();
+        _content = newContent;
+    }
+
+    private DbDictionary(List<DictionaryItem> items)
+    {
+        _content = items;
+    }
+
     private static (string group, object? norm) OrderKey(object key)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -187,12 +212,33 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
     /// Gets the value associated with the specified key.
     /// </summary>
     /// <param name="key">The key of the value to get.</param>
-    /// <returns>The value associated with the specified key, or default(T) if the key is not found.</returns>
-    public T? GetAt(object key)
+    /// <param name="value">When this method returns, the value associated with the specified key, if the key is found; otherwise, the default value for the type of the value parameter.</param>
+    /// <returns>true if the object that implements IDictionary<TKey,TValue> contains an element with the specified key; otherwise, false.</returns>
+    public bool TryGetValue(object key, out T value)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
         var idx = FindIndex(key);
-        if (idx >= 0) return _content[idx].Value;
+        if (idx >= 0)
+        {
+            value = _content[idx].Value;
+            return true;
+        }
+
+        value = default!;
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the value associated with the specified key.
+    /// </summary>
+    /// <param name="key">The key of the value to get.</param>
+    /// <returns>The value associated with the specified key, or default(T) if the key is not found.</returns>
+    public T? GetAt(object key)
+    {
+        if (TryGetValue(key, out var value))
+        {
+            return value;
+        }
         return default;
     }
 
@@ -207,19 +253,19 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
 
+        var newContent = new List<DictionaryItem>(_content);
         var idx = FindIndex(key);
         if (idx >= 0)
         {
-            _content[idx] = new DictionaryItem(key, value);
+            newContent[idx] = new DictionaryItem(key, value);
         }
         else
         {
             var ins = ~idx;
-            _content.Insert(ins, new DictionaryItem(key, value));
+            newContent.Insert(ins, new DictionaryItem(key, value));
         }
 
-        _opLog.Add(("set", key, value));
-        return this;
+        return new DbDictionary<T>(newContent);
     }
 
     /// <summary>
@@ -234,8 +280,9 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
         var idx = FindIndex(key);
         if (idx >= 0)
         {
-            _content.RemoveAt(idx);
-            _opLog.Add(("remove", key, default));
+            var newContent = new List<DictionaryItem>(_content);
+            newContent.RemoveAt(idx);
+            return new DbDictionary<T>(newContent);
         }
         return this;
     }
@@ -269,4 +316,16 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
     /// <param name="value">The value to associate with the key.</param>
     /// <returns>A new dictionary with the key-value pair set.</returns>
     public DbDictionary<T> SetAt(string key, T value) => SetAt((object)key, value);
+
+    public DbDictionary<T> Merge(DbDictionary<T> other)
+    {
+        if (other == null) return this;
+
+        var newDict = this;
+        foreach (var (key, value) in other.AsIterable())
+        {
+            newDict = newDict.SetAt(key, value);
+        }
+        return newDict;
+    }
 }

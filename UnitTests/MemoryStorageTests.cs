@@ -1,10 +1,16 @@
-
 using NUnit.Framework;
 using ProtoBaseNet;
 using System.Threading.Tasks;
 
 namespace MainTests
 {
+    public class TestAtom : Atom
+    {
+        public TestAtom(ObjectTransaction? transaction = null, AtomPointer? atomPointer = null) : base(transaction, atomPointer)
+        {
+        }
+    }
+
     [TestFixture]
     public class MemoryStorageTests
     {
@@ -19,7 +25,7 @@ namespace MainTests
         [Test]
         public async Task PushAndGetAtom()
         {
-            var atom = new Atom();
+            var atom = new TestAtom();
             var pointer = await _storage.PushAtom(atom);
             var retrievedAtom = await _storage.GetAtom(pointer);
             Assert.That(retrievedAtom, Is.EqualTo(atom));
@@ -46,7 +52,7 @@ namespace MainTests
         [Test]
         public async Task CloseClearsData()
         {
-            var atom = new Atom();
+            var atom = new TestAtom();
             var pointer = await _storage.PushAtom(atom);
             
             _storage.Close();

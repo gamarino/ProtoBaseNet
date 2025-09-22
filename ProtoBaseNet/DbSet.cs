@@ -24,12 +24,25 @@ public class DbSet<T> : DbCollection
     /// <summary>
     /// Gets the total number of elements in the set, including staged and persisted elements.
     /// </summary>
-    public new int Count => (_content?.Count ?? 0) + (_newObjects?.Count ?? 0);
+    public int Count => (_content?.Count ?? 0) + (_newObjects?.Count ?? 0);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DbSet{T}"/> class.
     /// </summary>
     public DbSet() { }
+
+    public DbSet(IEnumerable<T> items)
+    {
+        _content = new DbDictionary<T>();
+        _newObjects = new DbDictionary<T>();
+        _indexes = new DbDictionary<object>();
+
+        foreach (var item in items)
+        {
+            var h = StableHash(item!);
+            _newObjects = _newObjects.SetAt(h, item);
+        }
+    }
 
     private DbSet(DbDictionary<T> content, DbDictionary<T> newObjects, DbDictionary<object>? indexes)
     {
@@ -133,7 +146,7 @@ public class DbSet<T> : DbCollection
     /// <summary>
     /// Promotes staged elements to the persisted content.
     /// </summary>
-    public void Save()
+    internal override void Save()
     {
         foreach (var (k, v) in _newObjects.AsIterable())
         {

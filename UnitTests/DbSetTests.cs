@@ -1,7 +1,7 @@
-
 using NUnit.Framework;
 using ProtoBaseNet;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace MainTests
 {
@@ -51,7 +51,7 @@ namespace MainTests
         {
             var items = new List<string> { "a", "b" };
             var set = new DbSet<string>(items);
-            var newSet = set.Remove("a");
+            var newSet = set.RemoveAt("a");
 
             Assert.That(set.Count, Is.EqualTo(2)); // Original set is immutable
             Assert.That(newSet.Count, Is.EqualTo(1));
@@ -64,7 +64,7 @@ namespace MainTests
         {
             var items = new List<string> { "c", "a", "b" };
             var set = new DbSet<string>(items);
-            var list = set.ToList();
+            var list = new List<string>(set.AsIterable());
             
             // Order is not guaranteed in a set, so we sort for comparison
             list.Sort();

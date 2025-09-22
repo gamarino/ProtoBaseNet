@@ -59,7 +59,7 @@ var db = objectSpace.NewDatabase("MyTestDb");
 using (var transaction = db.NewTransaction())
 {
     // 4. Create an immutable list and set it as a root object
-    var myList = new DbList<string>().Append("hello").Append("world");
+    var myList = new DbList<string>().AppendLast("hello").AppendLast("world");
     transaction.SetRootObject("my_list", myList);
 
     // 5. Commit the transaction
