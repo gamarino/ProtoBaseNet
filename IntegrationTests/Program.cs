@@ -27,7 +27,9 @@ public class IntegrationTests
         using (var transaction = db.NewTransaction())
         {
             // 4. Create an immutable list and set it as a root object
-            var myList = new DbList<string>(new[] { "hello", "world" });
+            var myList = new DbList<string>();
+            myList = myList.AppendLast("hello");
+            myList = myList.AppendLast("world");
             transaction.SetRootObject("my_list", myList);
 
             // 5. Commit the transaction
