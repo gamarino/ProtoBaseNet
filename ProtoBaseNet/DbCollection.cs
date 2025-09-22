@@ -1,68 +1,98 @@
 namespace ProtoBaseNet
 {
-    // Base abstraction for secondary indexes over collections.
-    // Implementations should provide:
-    // - Add2Index: incorporate an item into the index
-    // - RemoveFromIndex: remove an item from the index
-    // - GetEmpty: return a structurally empty index instance (same type/config)
+    /// <summary>
+    /// Base abstraction for secondary indexes over collections.
+    /// </summary>
     public abstract class Index : Atom
     {
-        // Adds the given item to the index structure.
-        // Implementations must be idempotent or handle duplicates according to their semantics.
+        /// <summary>
+        /// Adds the given item to the index structure.
+        /// </summary>
+        /// <param name="item">The item to add to the index.</param>
+        /// <remarks>Implementations must be idempotent or handle duplicates according to their semantics.</remarks>
         public void Add2Index(object? item)
         {
             throw new NotImplementedException();    
         }
         
-        // Removes the given item from the index structure.
-        // Should not throw if the item is not present (no-op removal preferred).
+        /// <summary>
+        /// Removes the given item from the index structure.
+        /// </summary>
+        /// <param name="item">The item to remove from the index.</param>
+        /// <remarks>Should not throw if the item is not present (no-op removal preferred).</remarks>
         public void RemoveFromIndex(object? item)
         {
             throw new NotImplementedException();
         }
 
-        // Returns a new, empty index of the same shape/configuration as this instance.
+        /// <summary>
+        /// Returns a new, empty index of the same shape and configuration as this instance.
+        /// </summary>
+        /// <returns>An empty <see cref="Index"/>.</returns>
         public Index GetEmpty()
         {
             throw new NotImplementedException();
         }
-        
     }
     
-    // Abstract persistent collection base.
-    // Provides index management hooks and a concurrency-friendly update entry point.
+    /// <summary>
+    /// Abstract base class for all persistent collections.
+    /// Provides index management hooks and a concurrency-friendly update entry point.
+    /// </summary>
     public abstract class DbCollection : Atom
     {
-        // Logical item count (override in concrete collections).
+        /// <summary>
+        /// Gets the logical item count of the collection.
+        /// </summary>
         public int Count { get; } = 0;
 
-        // Optional dictionary of secondary indexes keyed by attribute name.
-        internal DbDictionary<Index>? Indexes { get; set; } // analogous to a dictionary in the reference implementation
+        internal DbDictionary<Index>? Indexes { get; set; }
 
-        // Adds or replaces an index for the given attribute. Returns a new collection by default.
+        /// <summary>
+        /// Adds or replaces an index for a given attribute.
+        /// </summary>
+        /// <param name="attributeName">The name of the attribute to index.</param>
+        /// <param name="newIndex">The index to add.</param>
+        /// <returns>A new collection with the index added.</returns>
         public virtual DbCollection IndexAdd(string attributeName, Index newIndex) => this;
 
-        // Removes an index for the given attribute. Returns a new collection by default.
+        /// <summary>
+        /// Removes an index for a given attribute.
+        /// </summary>
+        /// <param name="attributeName">The name of the attribute whose index should be removed.</param>
+        /// <returns>A new collection with the index removed.</returns>
         public virtual DbCollection IndexRemove(string attributeName) => this;
 
-        // Concurrent update hook: given a previous snapshot, returns a reconciled collection
-        // or null if the operation cannot be applied safely (e.g., due to conflicts).
+        /// <summary>
+        /// A hook for performing a concurrent update. Given a previous snapshot, returns a reconciled collection.
+        /// </summary>
+        /// <param name="previousDbCollection">The previous snapshot of the collection.</param>
+        /// <returns>A reconciled collection, or null if the operation cannot be applied safely.</returns>
         public DbCollection? ConcurrentUpdate(DbCollection previousDbCollection) => null;
-        
     }
 
-    // Query plan abstraction over collections.
-    // Supports optimization, reindexing, and execution into a materialized result.
+    /// <summary>
+    /// Represents a query plan abstraction over collections.
+    /// Supports optimization, re-indexing, and execution into a materialized result.
+    /// </summary>
     public abstract class QueryPlan : DbCollection
     {
-        // Applies cost-based or rule-based optimizations; default is identity.
+        /// <summary>
+        /// Applies cost-based or rule-based optimizations to the query plan.
+        /// </summary>
+        /// <returns>An optimized <see cref="DbCollection"/>.</returns>
         public DbCollection Optimize() => this;
 
-        // Rebuilds or refreshes indexes as needed; default is identity.
+        /// <summary>
+        /// Rebuilds or refreshes indexes as needed for the query.
+        /// </summary>
+        /// <returns>A <see cref="DbCollection"/> with updated indexes.</returns>
         public DbCollection ReIndex() => this;
 
-        // Executes the plan and returns a concrete collection (or null on failure/no-op).
+        /// <summary>
+        /// Executes the query plan and returns a concrete collection.
+        /// </summary>
+        /// <returns>A <see cref="DbCollection"/> containing the results of the query, or null on failure.</returns>
         public DbCollection? Execute() => null;
     }
-
 }

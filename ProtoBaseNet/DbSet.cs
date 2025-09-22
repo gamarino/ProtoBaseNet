@@ -5,26 +5,30 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 
-// Immutable, persistent-style set with transactional staging.
-// Key ideas:
-// - Structural sharing: Add/RemoveAt return new DbSet<T> instances, reusing existing dictionaries.
-// - Two-phase storage: _newObjects holds staged (ephemeral) elements; Save() promotes them to _content.
-// - Stable hashing: membership is determined by a deterministic hash computed from the element,
-//   ensuring consistent identity across sessions without forcing persistence of Atoms.
-// - Index hooks: _indexes exists as a placeholder for future index maintenance (0->1 and 1->0 transitions).
+/// <summary>
+/// An immutable, persistent-style set with transactional staging.
+/// </summary>
+/// <typeparam name="T">The type of elements in the set.</typeparam>
+/// <remarks>
+/// Key ideas:
+/// - Structural sharing: <see cref="Add"/> and <see cref="RemoveAt"/> return new <see cref="DbSet{T}"/> instances, reusing existing dictionaries.
+/// - Two-phase storage: New elements are staged and promoted to persisted content on <see cref="Save"/>.
+/// - Stable hashing: Membership is determined by a deterministic hash, ensuring consistent identity.
+/// </remarks>
 public class DbSet<T> : DbCollection
 {
-    // Persisted content (hash -> element).
     private DbDictionary<T> _content = new();
-    // Staged, not-yet-persisted elements (hash -> element).
     private DbDictionary<T> _newObjects = new();
-
-    // Optional index dictionary (name -> index). Kept generic for future integration.
     private DbDictionary<object>? _indexes = new();
 
-    // Total number of elements considering both persisted and staged views.
-    public int Count => (_content?.Count ?? 0) + (_newObjects?.Count ?? 0);
+    /// <summary>
+    /// Gets the total number of elements in the set, including staged and persisted elements.
+    /// </summary>
+    public new int Count => (_content?.Count ?? 0) + (_newObjects?.Count ?? 0);
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DbSet{T}"/> class.
+    /// </summary>
     public DbSet() { }
 
     private DbSet(DbDictionary<T> content, DbDictionary<T> newObjects, DbDictionary<object>? indexes)
@@ -34,11 +38,6 @@ public class DbSet<T> : DbCollection
         _indexes = indexes;
     }
 
-    // Deterministic hash function inspired by the template’s _hash_of:
-    // - Strings: SHA-256 of UTF-8 bytes
-    // - Bool/numbers: SHA-256 of a typed string "<type>:<value>"
-    // - Other: SHA-256 of "<TypeName>:<ToString()>"
-    // Fallback to GetHashCode() if any step fails.
     private static int StableHash(object? key)
     {
         if (key is null) return 0;
@@ -79,15 +78,22 @@ public class DbSet<T> : DbCollection
         }
     }
 
-    // Membership check across staged and persisted sets.
+    /// <summary>
+    /// Checks if the set contains the specified element.
+    /// </summary>
+    /// <param name="key">The element to check for.</param>
+    /// <returns>True if the element is in the set, otherwise false.</returns>
     public bool Has(T key)
     {
         var h = StableHash(key!);
         return _newObjects.Has(h) || _content.Has(h);
     }
 
-    // Adds an element if not already present. Returns a new set instance.
-    // Index update semantics (if implemented) should occur on 0 -> 1 transition.
+    /// <summary>
+    /// Adds an element to the set.
+    /// </summary>
+    /// <param name="key">The element to add.</param>
+    /// <returns>A new set with the element added, or the same set if the element is already present.</returns>
     public DbSet<T> Add(T key)
     {
         if (Has(key)) return this;
@@ -98,8 +104,11 @@ public class DbSet<T> : DbCollection
         return new DbSet<T>(_content, newNew, newIndexes);
     }
 
-    // Removes an element if present. Returns a new set instance.
-    // Index update semantics (if implemented) should occur on 1 -> 0 transition.
+    /// <summary>
+    /// Removes an element from the set.
+    /// </summary>
+    /// <param name="key">The element to remove.</param>
+    /// <returns>A new set with the element removed, or the same set if the element is not present.</returns>
     public DbSet<T> RemoveAt(T key)
     {
         var h = StableHash(key!);
@@ -121,22 +130,22 @@ public class DbSet<T> : DbCollection
         return new DbSet<T>(newCont, newNew, newIndexes);
     }
 
-    // Promotes staged elements to persisted content.
-    // In a full Atom-backed implementation, this would also Save underlying structures.
+    /// <summary>
+    /// Promotes staged elements to the persisted content.
+    /// </summary>
     public void Save()
     {
-        // Promote all ephemeral elements to persisted content.
         foreach (var (k, v) in _newObjects.AsIterable())
         {
             _content = _content.SetAt(k, v);
         }
-        // Clear staging.
         _newObjects = new DbDictionary<T>();
-        // Persist content/indexes if required by infrastructure (placeholder).
     }
 
-    // Iterates elements: staged first, then persisted.
-    // If duplicates occur across views (shouldn’t under normal use), both will be yielded.
+    /// <summary>
+    /// Returns an enumerable that iterates through the elements in the set.
+    /// </summary>
+    /// <returns>An <see cref="IEnumerable{T}"/> for the set.</returns>
     public IEnumerable<T> AsIterable()
     {
         foreach (var (_, v) in _newObjects.AsIterable())
@@ -145,7 +154,11 @@ public class DbSet<T> : DbCollection
             yield return v;
     }
 
-    // Set union (functional): adds all elements from 'other'.
+    /// <summary>
+    /// Produces the union of this set and another set.
+    /// </summary>
+    /// <param name="other">The set to perform the union with.</param>
+    /// <returns>A new set that contains all elements present in either set.</returns>
     public DbSet<T> Union(DbSet<T> other)
     {
         var result = this;
@@ -154,7 +167,11 @@ public class DbSet<T> : DbCollection
         return result;
     }
 
-    // Set intersection (functional): elements present in both sets.
+    /// <summary>
+    /// Produces the intersection of this set and another set.
+    /// </summary>
+    /// <param name="other">The set to perform the intersection with.</param>
+    /// <returns>A new set that contains only the elements present in both sets.</returns>
     public DbSet<T> Intersection(DbSet<T> other)
     {
         var result = new DbSet<T>();
@@ -166,7 +183,11 @@ public class DbSet<T> : DbCollection
         return result;
     }
 
-    // Set difference (functional): elements in this set but not in 'other'.
+    /// <summary>
+    /// Produces the set difference of this set and another set.
+    /// </summary>
+    /// <param name="other">The set to subtract.</param>
+    /// <returns>A new set that contains the elements from this set that are not in the other set.</returns>
     public DbSet<T> Difference(DbSet<T> other)
     {
         var result = new DbSet<T>();
@@ -179,11 +200,8 @@ public class DbSet<T> : DbCollection
     }
 }
 
-// Minimal utility extensions over DbDictionary<T> used by DbSet<T> to support staging and iteration.
-// Note: These rely on the existing DbDictionary<T> API for SetAt/RemoveAt/GetAt/iteration.
 file static class DbDictionaryExtensions
 {
-    // Copies entries from 'source' into 'target', returning the new dictionary (functional style).
     public static DbDictionary<T> ExtendFrom<T>(this DbDictionary<T> target, DbDictionary<T> source)
     {
         foreach (var (k, v) in source.AsIterable())
@@ -191,7 +209,6 @@ file static class DbDictionaryExtensions
         return target;
     }
 
-    // Iterates pairs (int keyHash, T value). DbDictionary<T> exposes object keys; we coerce to int when possible.
     public static IEnumerable<(int key, T value)> AsIterable<T>(this DbDictionary<T> dict)
     {
         foreach (var kv in dict)
@@ -202,7 +219,6 @@ file static class DbDictionaryExtensions
         }
     }
 
-    // Convenience wrappers using int keys for this set’s hash-based dictionary.
     public static bool Has<T>(this DbDictionary<T> dict, int key)
         => dict.GetAt(key) is not null;
 

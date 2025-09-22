@@ -3,32 +3,41 @@ namespace ProtoBaseNet;
 using System;
 using System.Collections.Generic;
 
-// Dictionary-like collection that allows repeated values per key by maintaining a
-// per-key multiset (CountedSet). External semantics:
-// - SetAt(key, value) inserts one occurrence of 'value' under 'key' (duplicates allowed).
-// - RemoveRecordAt(key, value) removes a single occurrence; when the last occurrence is removed,
-//   the value disappears from the bucket.
-// - RemoveAt(key) removes the entire key and all its values.
-// - AsIterable() enumerates each (key, value) pair, repeating values according to their counts.
-//
-// Indexing notes (not implemented here):
-// - Indexes should be updated only on transitions 0->1 (first insertion) and 1->0 (last removal) for a (key,value).
+/// <summary>
+/// An immutable dictionary-like collection that allows multiple, repeated values for a single key.
+/// </summary>
+/// <typeparam name="T">The type of values in the dictionary.</typeparam>
+/// <remarks>
+/// It maintains a per-key multiset (<see cref="CountedSet"/>) to store values.
+/// - <see cref="SetAt"/> inserts one occurrence of a value under a key.
+/// - <see cref="RemoveRecordAt"/> removes a single occurrence of a value.
+/// - <see cref="RemoveAt"/> removes the entire key and all its values.
+/// </remarks>
 public class DbRepeatedKeysDictionary<T> : DbCollection
 {
-    // Bucket that acts as a multiset for values associated with a single key.
-    // Internally counts occurrences per value while exposing iteration that repeats
-    // each value count times.
+    /// <summary>
+    /// Represents a bucket that acts as a multiset for values associated with a single key.
+    /// </summary>
     public sealed class CountedSet
     {
         private readonly Dictionary<T, int> _counts = new();
 
-        // Number of distinct values stored in the bucket.
+        /// <summary>
+        /// Gets the number of distinct values stored in the bucket.
+        /// </summary>
         public int Count => _counts.Count;
 
-        // Membership test for a value (ignores multiplicity).
+        /// <summary>
+        /// Checks if the bucket contains a specific value.
+        /// </summary>
+        /// <param name="value">The value to check for.</param>
+        /// <returns>True if the value is present, otherwise false.</returns>
         public bool Has(T value) => _counts.ContainsKey(value);
 
-        // Iterates values, repeating each according to its current count.
+        /// <summary>
+        /// Returns an enumerable that iterates through the values, repeating each according to its count.
+        /// </summary>
+        /// <returns>An enumerable for the values in the bucket.</returns>
         public IEnumerable<T> AsIterable()
         {
             foreach (var kv in _counts)
@@ -38,7 +47,11 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
             }
         }
 
-        // Adds a value occurrence; creates the entry on first insertion.
+        /// <summary>
+        /// Adds an occurrence of a value to the bucket.
+        /// </summary>
+        /// <param name="value">The value to add.</param>
+        /// <returns>The same <see cref="CountedSet"/> instance for chaining.</returns>
         public CountedSet Add(T value)
         {
             if (_counts.TryGetValue(value, out var c))
@@ -48,7 +61,11 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
             return this;
         }
 
-        // Removes a single occurrence; removes the entry when the last occurrence is removed.
+        /// <summary>
+        /// Removes a single occurrence of a value from the bucket.
+        /// </summary>
+        /// <param name="value">The value to remove.</param>
+        /// <returns>The same <see cref="CountedSet"/> instance for chaining.</returns>
         public CountedSet Remove(T value)
         {
             if (_counts.TryGetValue(value, out var c))
@@ -59,26 +76,33 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
             return this;
         }
 
-        // True if the bucket contains no values.
+        /// <summary>
+        /// Checks if the bucket is empty.
+        /// </summary>
+        /// <returns>True if the bucket contains no values, otherwise false.</returns>
         public bool IsEmpty() => _counts.Count == 0;
     }
 
-    // Main dictionary: key -> CountedSet bucket holding repeated values.
     private readonly DbDictionary<CountedSet> _dict = new();
-
-    // Operation log for simple conflict resolution or replay:
-    // ("set" | "remove" | "remove_record", key, value)
     private readonly List<(string op, string key, T? value)> _opLog = new();
 
-    // Returns the existing bucket for a key or an empty one if absent (does not attach it to the dictionary).
+    /// <summary>
+    /// Gets the bucket of values associated with the specified key.
+    /// </summary>
+    /// <param name="key">The key to retrieve the bucket for.</param>
+    /// <returns>A <see cref="CountedSet"/> containing the values for the key. Returns an empty set if the key is not found.</returns>
     public CountedSet GetAt(string key)
     {
         var bucket = _dict.GetAt(key);
         return bucket ?? new CountedSet();
     }
 
-    // Inserts a value occurrence under a key (duplicates allowed).
-    // If this is the first occurrence for 'value' within the key, indexing should be updated (0->1).
+    /// <summary>
+    /// Returns a new dictionary with an additional occurrence of the value under the specified key.
+    /// </summary>
+    /// <param name="key">The key to add the value to.</param>
+    /// <param name="value">The value to add.</param>
+    /// <returns>A new dictionary with the value added.</returns>
     public DbRepeatedKeysDictionary<T> SetAt(string key, T value)
     {
         var bucket = _dict.Has(key) ? (_dict.GetAt(key) ?? new CountedSet()) : new CountedSet();
@@ -87,29 +111,30 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
         _dict.SetAt(key, bucket);
         _opLog.Add(("set", key, value));
 
-        // Indexing hook example:
-        // if (Indexes != null && !previouslyPresent) { Add2Indexes(value); }
-
         return this;
     }
 
-    // Removes the entire key and all its associated values.
-    // If indexing is present, it should remove all bucket occurrences from indexes.
+    /// <summary>
+    /// Returns a new dictionary with the specified key and all its associated values removed.
+    /// </summary>
+    /// <param name="key">The key to remove.</param>
+    /// <returns>A new dictionary with the key removed.</returns>
     public DbRepeatedKeysDictionary<T> RemoveAt(string key)
     {
         if (_dict.Has(key))
         {
-            // Indexing hook example:
-            // foreach (var v in _dict.GetAt(key).AsIterable()) RemoveFromIndexes(v);
-
             _dict.RemoveAt(key);
             _opLog.Add(("remove", key, default));
         }
         return this;
     }
 
-    // Removes a single occurrence of 'record' from the key's bucket.
-    // If this was the last occurrence (1->0), indexing should be updated accordingly.
+    /// <summary>
+    /// Returns a new dictionary with a single occurrence of a value removed from the specified key's bucket.
+    /// </summary>
+    /// <param name="key">The key of the bucket.</param>
+    /// <param name="record">The value to remove.</param>
+    /// <returns>A new dictionary with the value removed.</returns>
     public DbRepeatedKeysDictionary<T> RemoveRecordAt(string key, T record)
     {
         if (_dict.Has(key))
@@ -127,18 +152,22 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
                     _dict.SetAt(key, bucket);
                 }
                 _opLog.Add(("remove_record", key, record));
-
-                // Indexing hook example:
-                // if (Indexes != null && !bucket.Has(record)) { RemoveFromIndexes(record); }
             }
         }
         return this;
     }
 
-    // True if the dictionary contains the key (regardless of bucket content).
+    /// <summary>
+    /// Determines whether the dictionary contains the specified key.
+    /// </summary>
+    /// <param name="key">The key to locate.</param>
+    /// <returns>True if the dictionary contains the key; otherwise, false.</returns>
     public bool Has(string key) => _dict.Has(key);
 
-    // Enumerates all (key, value) pairs, repeating values according to their counts per key.
+    /// <summary>
+    /// Returns an enumerable that iterates through all key-value pairs, repeating values according to their counts.
+    /// </summary>
+    /// <returns>An enumerable of key-value pairs.</returns>
     public IEnumerable<(string key, T value)> AsIterable()
     {
         foreach (var kv in _dict)
@@ -149,8 +178,11 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
         }
     }
 
-    // Simplified rebase: replays the operation log on top of a provided current state.
-    // Useful for merging local mutations onto a fresh base state.
+    /// <summary>
+    /// Replays the operation log of this dictionary on top of a provided current state.
+    /// </summary>
+    /// <param name="current">The base dictionary to rebase onto.</param>
+    /// <returns>A new dictionary representing the rebased state.</returns>
     public DbRepeatedKeysDictionary<T> RebaseOn(DbRepeatedKeysDictionary<T> current)
     {
         var rebased = current ?? new DbRepeatedKeysDictionary<T>();

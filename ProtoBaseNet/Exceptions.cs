@@ -1,31 +1,49 @@
 namespace ProtoBaseNet;
 
-// Legacy placeholder container (unused in typical flows).
-// Prefer throwing concrete exception types below rather than using this wrapper.
+/// <summary>
+/// A legacy placeholder container for exceptions.
+/// </summary>
+/// <remarks>This class is not used in typical flows. Prefer throwing concrete exception types.</remarks>
 public class Exceptions
 {
-    // Human-readable message describing the error condition.
+    /// <summary>
+    /// Gets or sets a human-readable message describing the error condition.
+    /// </summary>
     public string Message { get; set; }
-    
 }
 
-// Thrown when input data, state preconditions, or API contracts are violated.
-// Typical use cases:
-// - Invalid arguments or missing required fields
-// - Illegal state transitions (e.g., operations on a closed resource)
-// - Business rule validation failures
+/// <summary>
+/// The exception that is thrown when input data, state preconditions, or API contracts are violated.
+/// </summary>
+/// <remarks>
+/// Typical use cases:
+/// - Invalid arguments or missing required fields.
+/// - Illegal state transitions (e.g., operations on a closed resource).
+/// - Business rule validation failures.
+/// </remarks>
 public class ProtoValidationException : Exception
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProtoValidationException"/> class with a specified error message.
+    /// </summary>
+    /// <param name="message">The message that describes the error.</param>
     public ProtoValidationException(string message) : base(message) { }
 }
 
-// Thrown when storage or in-memory structures exhibit signs of inconsistency
-// or corruption that cannot be recovered safely.
-// Typical use cases:
-// - Broken pointers or unexpected missing data during load
-// - Invariants violated in persistent structures
-// - Serialization/deserialization mismatches that indicate data damage
+/// <summary>
+/// The exception that is thrown when storage or in-memory structures exhibit signs of inconsistency or corruption.
+/// </summary>
+/// <remarks>
+/// Typical use cases:
+/// - Broken pointers or unexpected missing data during load.
+/// - Invariants violated in persistent structures.
+/// - Serialization/deserialization mismatches that indicate data damage.
+/// </remarks>
 public class ProtoCorruptionException : Exception
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ProtoCorruptionException"/> class with a specified error message.
+    /// </summary>
+    /// <param name="message">The message that describes the error.</param>
     public ProtoCorruptionException(string message) : base(message) { }
 }

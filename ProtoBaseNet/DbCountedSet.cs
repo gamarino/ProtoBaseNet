@@ -3,28 +3,31 @@ namespace ProtoBaseNet;
 using System;
 using System.Collections.Generic;
 
-// A multiset that preserves Set-like external semantics:
-// - Iteration yields unique items (no duplicates)
-// - Count reflects the number of unique items
-// - TotalCount reflects total number of occurrences
-// Index update semantics:
-// - On first insertion (0 -> 1): update indexes (add)
-// - On last removal (1 -> 0): update indexes (remove)
-// - Intermediate increments/decrements do not touch indexes
+/// <summary>
+/// An immutable multiset (or bag) that stores elements and their occurrence counts.
+/// </summary>
+/// <typeparam name="T">The type of elements in the set.</typeparam>
+/// <remarks>
+/// This collection preserves Set-like external semantics:
+/// - Iteration yields unique items.
+/// - <see cref="UniqueCount"/> reflects the number of unique items.
+/// - <see cref="TotalCount"/> reflects the total number of occurrences of all items.
+/// </remarks>
 public class DbCountedSet<T> : DbCollection
 {
-    // Unique items by a stable hash identity
     private readonly DbDictionary<T> _items;
-    // Occurrence counters keyed by the same hash identity
     private readonly DbDictionary<int> _counts;
-    // Staged (not yet persisted) unique items in the current transaction
     private readonly DbDictionary<T> _newObjects;
-    // Staged counts for the same keys
     private readonly DbDictionary<int> _newCounts;
 
-    // Expose number of unique items (items dictionary)
+    /// <summary>
+    /// Gets the number of unique items in the set.
+    /// </summary>
     public int UniqueCount => _items.Count;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DbCountedSet{T}"/> class.
+    /// </summary>
     public DbCountedSet(
         DbDictionary<T>? items = null,
         DbDictionary<int>? counts = null,
@@ -42,25 +45,39 @@ public class DbCountedSet<T> : DbCollection
         Indexes = indexes;
     }
 
-    // Iteration yields unique items (persisted view)
+    /// <summary>
+    /// Returns an enumerable that iterates through the unique items in the set.
+    /// </summary>
+    /// <returns>An <see cref="IEnumerable{T}"/> for the unique items.</returns>
     public IEnumerable<T> AsIterable()
     {
         foreach (var (key, value) in _items.AsIterable())
             yield return value;
     }
 
-    // Public enumerable
+    /// <summary>
+    /// Returns an enumerator that iterates through the unique items in the set.
+    /// </summary>
+    /// <returns>An enumerator for the set.</returns>
     public IEnumerator<T> GetEnumerator() => AsIterable().GetEnumerator();
 
-    // Query helpers
+    /// <summary>
+    /// Determines whether the set contains a specific element.
+    /// </summary>
+    /// <param name="key">The element to locate in the set.</param>
+    /// <returns>True if the element is found in the set; otherwise, false.</returns>
     public bool Has(T key)
     {
         var h = HashOf(key);
-        // Pending/new view has priority for membership
         if (_newCounts.Has(h)) return true;
         return _counts.Has(h);
     }
 
+    /// <summary>
+    /// Gets the number of occurrences of a specific element.
+    /// </summary>
+    /// <param name="key">The element to count.</param>
+    /// <returns>The number of times the element appears in the set.</returns>
     public int GetCount(T key)
     {
         var h = HashOf(key);
@@ -69,7 +86,9 @@ public class DbCountedSet<T> : DbCollection
         return 0;
     }
 
-    // Total number of occurrences across all unique items (persisted only)
+    /// <summary>
+    /// Gets the total number of occurrences of all items in the set.
+    /// </summary>
     public int TotalCount
     {
         get
@@ -83,15 +102,17 @@ public class DbCountedSet<T> : DbCollection
         }
     }
 
-    // Add an occurrence of key
+    /// <summary>
+    /// Adds an element to the set. If the element already exists, its count is incremented.
+    /// </summary>
+    /// <param name="key">The element to add.</param>
+    /// <returns>A new counted set with the element added or its count incremented.</returns>
     public DbCountedSet<T> Add(T key)
     {
-        // Defensive: avoid nesting counted sets/sets (optional, no-op if not applicable)
         if (key is DbCountedSet<T>) return this;
 
         var h = HashOf(key);
 
-        // Increment persisted count if exists (no index updates)
         if (_counts.Has(h))
         {
             var current = _counts.GetAt(h) ?? 0;
@@ -99,7 +120,6 @@ public class DbCountedSet<T> : DbCollection
             return Clone(items: _items, counts: newCounts, newObjects: _newObjects, newCounts: _newCounts);
         }
 
-        // If staged exists, increment staged count and mirror to persisted counts view
         if (_newCounts.Has(h))
         {
             var staged = _newCounts.GetAt(h) ?? 0;
@@ -109,7 +129,6 @@ public class DbCountedSet<T> : DbCollection
             return Clone(items: _items, counts: newCountsPersisted, newObjects: _newObjects, newCounts: newNewCounts);
         }
 
-        // First insertion: record item and count=1; update indexes for 0 -> 1 transition
         var ni = _items.SetAt(h, key);
         var nno = _newObjects.SetAt(h, key);
         var nnc = _newCounts.SetAt(h, 1);
@@ -118,7 +137,6 @@ public class DbCountedSet<T> : DbCollection
         var newIndexes = Indexes;
         if (newIndexes is not null)
         {
-            // For each index, delegate addition; concrete Index will decide how to handle it
             foreach (var (attr, idx) in newIndexes.AsIterable())
             {
                 idx.Add2Index(key);
@@ -128,7 +146,11 @@ public class DbCountedSet<T> : DbCollection
         return Clone(items: ni, counts: ncp, newObjects: nno, newCounts: nnc, indexes: newIndexes);
     }
 
-    // Remove one occurrence of key
+    /// <summary>
+    /// Removes one occurrence of an element from the set.
+    /// </summary>
+    /// <param name="key">The element to remove.</param>
+    /// <returns>A new counted set with the element removed or its count decremented.</returns>
     public DbCountedSet<T> RemoveAt(T key)
     {
         var h = HashOf(key);
@@ -148,7 +170,6 @@ public class DbCountedSet<T> : DbCollection
             }
             else
             {
-                // Last removal: drop item and counts, update indexes
                 newCounts = newCounts.RemoveAt(h);
                 newItems = newItems.RemoveAt(h);
 
@@ -190,18 +211,14 @@ public class DbCountedSet<T> : DbCollection
             return Clone(_items, _counts, newNewObjects, newNewCounts, newIndexes);
         }
 
-        // Not present: no-op
         return this;
     }
 
-    // Persists staged items and consolidates counts.
-    // Convention: call Save() when needed by transaction/Atom lifecycle.
-    protected virtual void Save()
+    protected override void Save()
     {
         if (_saved) return;
         _saved = true;
 
-        // Persist items staged in _newObjects with their pending counts
         foreach (var (h, element) in _newObjects.AsIterable())
         {
             if (element is Atom a)
@@ -213,12 +230,10 @@ public class DbCountedSet<T> : DbCollection
             var inc = _newCounts.Has(h) ? (_newCounts.GetAt(h) ?? 0) : 0;
             var baseCnt = _counts.Has(h) ? (_counts.GetAt(h) ?? 0) : 0;
 
-            // Ensure the item exists and set the correct total count
             _items.SetAt(h, element);
             _counts.SetAt(h, baseCnt + inc);
         }
 
-        // Persist dictionaries themselves if they are atoms
         _items.Transaction ??= this.Transaction;
         (_items as Atom)?.Save();
 
@@ -228,12 +243,10 @@ public class DbCountedSet<T> : DbCollection
         _saved = false;
     }
 
-    // Compute a stable integer identity for membership
     private object HashOf(T key)
     {
         try
         {
-            // Atoms: prefer pointer-derived identity if persisted
             if (key is Atom atom)
             {
                 var ap = atom.AtomPointer;
@@ -242,7 +255,6 @@ public class DbCountedSet<T> : DbCollection
                 return atom.GetHashCode();
             }
 
-            // Strings: deterministic hash via SHA256 of UTF8
             if (key is string s)
             {
                 using var sha = System.Security.Cryptography.SHA256.Create();
@@ -251,7 +263,6 @@ public class DbCountedSet<T> : DbCollection
                 return BitConverter.ToString(hash);
             }
 
-            // Numbers/bools: typed string then hash
             if (key is IFormattable || key is bool)
             {
                 var typed = $"{key.GetType().Name}:{key}";
@@ -261,7 +272,6 @@ public class DbCountedSet<T> : DbCollection
                 return BitConverter.ToString(hash);
             }
 
-            // Fallback: type name + ToString; otherwise Object.GetHashCode
             var repr = $"{key?.GetType().Name}:{key}";
             using (var sha2 = System.Security.Cryptography.SHA256.Create())
             {
@@ -276,7 +286,6 @@ public class DbCountedSet<T> : DbCollection
         }
     }
 
-    // Helper to clone with structural sharing
     private DbCountedSet<T> Clone(
         DbDictionary<T>? items = null,
         DbDictionary<int>? counts = null,

@@ -5,14 +5,29 @@ using System.Text.Json;
 
 namespace ProtoBaseNet
 {
-    // Represents a logical pointer to an atom within the storage (transaction id + offset).
-    // Equality is structural; two pointers are equal if both parts match.
+    /// <summary>
+    /// Represents a logical pointer to an atom within the storage, defined by a transaction ID and an offset.
+    /// </summary>
+    /// <remarks>
+    /// Equality is structural; two pointers are equal if both their TransactionId and Offset match.
+    /// </remarks>
     public class AtomPointer
     {
+        /// <summary>
+        /// Gets or sets the transaction identifier.
+        /// </summary>
         public Guid TransactionId { get; set; }
+
+        /// <summary>
+        /// Gets or sets the offset within the transaction.
+        /// </summary>
         public int Offset { get; set; }
 
-        // If a transaction id is not provided, a new Guid is generated.
+        /// <summary>
+        /// Initializes a new instance of the <see cref="AtomPointer"/> class.
+        /// </summary>
+        /// <param name="transactionId">The transaction ID. If null, a new GUID is generated.</param>
+        /// <param name="offset">The offset.</param>
         public AtomPointer(Guid? transactionId = null, int offset = 0)
         {
             TransactionId = transactionId ?? Guid.NewGuid();
@@ -32,20 +47,28 @@ namespace ProtoBaseNet
         }
     }
 
-    // Base type for all persisted objects (“atoms”). It encapsulates:
-    // - A storage pointer (AtomPointer)
-    // - An owning transaction (Transaction)
-    // - Load/Save lifecycle with JSON-based serialization
-    // - Extension points for dynamic attributes and post-load hooks
+    /// <summary>
+    /// The base type for all persisted objects (“atoms”) in ProtoBaseNet.
+    /// </summary>
+    /// <remarks>
+    /// It encapsulates:
+    /// - A storage pointer (<see cref="AtomPointer"/>)
+    /// - An owning transaction (<see cref="ObjectTransaction"/>)
+    /// - A load/save lifecycle with JSON-based serialization
+    /// - Extension points for dynamic attributes and post-load hooks
+    /// </remarks>
     public abstract class Atom
     {
-        // Pointer to the atom data within the storage. May be null before the first save.
+        /// <summary>
+        /// Gets or sets the pointer to the atom's data in storage. May be null before the first save.
+        /// </summary>
         public AtomPointer? AtomPointer { get; set; }
 
-        // Owning transaction used for I/O, object materialization, and nested saves.
+        /// <summary>
+        /// Gets or sets the owning transaction used for I/O and object materialization.
+        /// </summary>
         public ObjectTransaction? Transaction { get; set; }
 
-        // State flags to avoid redundant I/O and re-entrancy loops.
         protected bool _loaded = false;
         protected bool _saved = false;
 
@@ -55,22 +78,16 @@ namespace ProtoBaseNet
             AtomPointer = atomPointer;
         }
         
-        // Allows derived types to support ad-hoc/dynamic attributes during load.
-        // Default behavior is to signal missing members.
         protected virtual void SetDynamicAttribute(string attributeName, object value) => throw new MissingFieldException();
 
-        // Allows derived types to expose dynamic attributes to be included in Save().
         protected virtual Dictionary<string, object> GetDynamicAttributes() => new Dictionary<string, object>();
         
-        // Lazily loads the atom content from storage using the current Transaction and AtomPointer.
-        // Deserialization is JSON-based and supports embedded Atoms, literals, and selected primitive types.
         protected virtual void Load()
         {
             if (_loaded) return;
 
             if (Transaction != null && AtomPointer != null)
             {
-                // Synchronously retrieve raw bytes (GetAwaiter().GetResult) to keep the current sync API contract.
                 var bytes = Transaction.Storage.GetBytes(AtomPointer).GetAwaiter().GetResult();
                 if (bytes is { Length: > 0 })
                 {
@@ -79,7 +96,6 @@ namespace ProtoBaseNet
                     
                     if (loadedAtomDict != null)
                     {
-                        // Normalize/convert raw JSON into runtime objects (including nested Atoms).
                         var loadedDict = JsonToDict(loadedAtomDict);
 
                         foreach (var kv in loadedDict)
@@ -87,34 +103,28 @@ namespace ProtoBaseNet
                             var attributeName = kv.Key;
                             var attributeValue = kv.Value;
 
-                            // Bind by field name (case-insensitive) on the runtime type.
                             var field = GetType().GetField(attributeName, BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                             if (field != null)
                             {
                                 try
                                 {
-                                    // Attempt direct assignment first.
                                     field.SetValue(this, attributeValue);
                                 }
                                 catch (ArgumentException)
                                 {
-                                    // If types mismatch (e.g., JsonElement), attempt conversion to the target field type.
                                     object? convertedValue = TryConvert(attributeValue, field.FieldType);
                                     field.SetValue(this, convertedValue);
                                 }
                                 catch (MissingFieldException)
                                 {
-                                    // Defer to dynamic attribute handler if the field cannot be set.
                                     SetDynamicAttribute(attributeName, attributeValue);
                                 }
                             }
                             else
                             {
-                                // No matching field: treat as a dynamic attribute.
                                 SetDynamicAttribute(attributeName, attributeValue);
                             }
 
-                            // Propagate the current transaction to nested Atoms.
                             if (attributeValue is Atom atomValue)
                             {
                                 atomValue.Transaction = Transaction;
@@ -128,12 +138,13 @@ namespace ProtoBaseNet
             AfterLoad();
         }
 
-        // Hook for subclasses to run domain-specific logic after a successful Load().
+        /// <summary>
+        /// A hook for subclasses to run domain-specific logic after a successful Load operation.
+        /// </summary>
         public virtual void AfterLoad()
         {
         }
 
-        // Equality: if both sides have pointers, equality is pointer-based; otherwise, reference equality.
         public override bool Equals(object? obj)
         {
             if (obj is Atom other)
@@ -147,11 +158,6 @@ namespace ProtoBaseNet
             return false;
         }
 
-        // Converts a JSON object dictionary into runtime objects, including:
-        // - DateTime/Date (roundtrip)
-        // - TimeSpan (microseconds)
-        // - Atoms by pointer (transaction_id + offset)
-        // - Literal atoms by value or pointer
         protected virtual Dictionary<string, object> JsonToDict(Dictionary<string, object> jsonData)
         {
             var data = new Dictionary<string, object>();
@@ -182,7 +188,6 @@ namespace ProtoBaseNet
                                     convertedValue = new TimeSpan(micros * 10);
                                 break;
                             case "Literal":
-                                // Literal atoms may be referenced by pointer or inline string.
                                 if (valueDict.ContainsKey("transaction_id"))
                                 {
                                     var ap = BuildPointer(valueDict);
@@ -197,7 +202,6 @@ namespace ProtoBaseNet
                                 }
                                 break;
                             default:
-                                // Generic Atom by pointer is required.
                                 if (valueDict.ContainsKey("transaction_id"))
                                 {
                                     var ap = BuildPointer(valueDict);
@@ -214,29 +218,22 @@ namespace ProtoBaseNet
                     }
                     else
                     {
-                        // Non-typed JSON objects are preserved as dictionaries.
                         if (valueDict is not null)
                             data[name] = valueDict;
                     }
                 }
                 else if (value is JsonElement primitiveJe)
                 {
-                    // Normalize primitive JsonElement values to .NET primitives when possible.
                     data[name] = ConvertFromJsonElement(primitiveJe);
                 }
                 else
                 {
-                    // Raw primitive or already-converted value.
                     data[name] = value!;
                 }
             }
             return data;
         }
 
-        // Converts runtime data to a JSON-friendly dictionary. It:
-        // - Ensures nested Atoms are saved and referenced by pointer
-        // - Serializes DateTime/TimeSpan to structured forms
-        // - Encodes byte[] as Base64
         protected virtual Dictionary<string, object> DictToJson(Dictionary<string, object> data)
         {
             var jsonValue = new Dictionary<string, object>();
@@ -272,7 +269,6 @@ namespace ProtoBaseNet
                         };
                         break;
                     case byte[] bytes:
-                        // Stored as Base64. A specialized BytesAtom can be introduced in the future.
                         jsonValue[name] = Convert.ToBase64String(bytes);
                         break;
                     case not null:
@@ -283,8 +279,6 @@ namespace ProtoBaseNet
             return jsonValue;
         }
 
-        // Persists the current Atom if not already saved. Invokes Load() to ensure full state,
-        // then serializes fields plus dynamic attributes and pushes the payload to storage.
         protected virtual void Save()
         {
             Load();
@@ -301,12 +295,10 @@ namespace ProtoBaseNet
 
             if (this is DbLiteral literal)
             {
-                // Special case: literals are persisted by value.
                 jsonValue["string"] = literal.Value;
             }
             else
             {
-                // Serialize non-private, non-readonly instance fields except internal runtime fields.
                 var fields = GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                 foreach (var field in fields)
                 {
@@ -317,11 +309,9 @@ namespace ProtoBaseNet
 
                     if (value is string str)
                     {
-                        // Strings are saved via literal atoms to ensure deduplication and stable referencing.
                         var literalAtom = Transaction.GetLiteral(str);
                         if (literalAtom.AtomPointer == null)
                         {
-                            // Ensure literals created during this tx are persisted.
                             Transaction.UpdateCreatedLiterals(Transaction, Transaction.NewLiterals);
                         }
                         if (literalAtom.AtomPointer == null) throw new ProtoCorruptionException("Corruption saving string as literal!");
@@ -339,32 +329,26 @@ namespace ProtoBaseNet
                     }
                 }
                 
-                // Append dynamic attributes provided by subclasses.
                 foreach (var dynamicAttribute in GetDynamicAttributes())
                 {
                     jsonValue[dynamicAttribute.Key] = dynamicAttribute.Value;
                 }
             }
 
-            // Final JSON normalization then persist to storage.
             var finalJson = DictToJson(jsonValue);
             var jsonString = JsonSerializer.Serialize(finalJson);
             var bytes = System.Text.Encoding.UTF8.GetBytes(jsonString);
             AtomPointer = Transaction.Storage.PushBytes(bytes).GetAwaiter().GetResult();
 
-            // Reset the flag so subsequent modifications within the same transaction can be re-saved.
             _saved = false;
         }
 
         public override int GetHashCode()
         {
-            // Ensure persisted identity before computing a stable hash based on the pointer.
             Save();
             return AtomPointer?.GetHashCode() ?? 0;
         }
 
-        // Attempts to convert a deserialized value into the specified target type.
-        // Handles JsonElement primitives and falls back to ChangeType or identity.
         private static object? TryConvert(object? value, Type targetType)
         {
             if (value is null) return null;
@@ -382,7 +366,6 @@ namespace ProtoBaseNet
             }
         }
 
-        // Converts a JsonElement into a reasonable .NET type, optionally guided by the target type.
         private static object? ConvertFromJsonElement(JsonElement je, Type? targetType = null)
         {
             try
@@ -404,12 +387,10 @@ namespace ProtoBaseNet
             }
             catch
             {
-                // As a last resort, return the raw JSON text.
                 return je.ToString();
             }
         }
 
-        // Builds an AtomPointer from a JSON dictionary containing "transaction_id" and "offset".
         private static AtomPointer BuildPointer(Dictionary<string, object> dict)
         {
             var txStr = dict.TryGetValue("transaction_id", out var t) ? t?.ToString() : null;

@@ -37,18 +37,19 @@ namespace ProtoBaseNet
     }
 
     /// <summary>
-    /// Top-level façade over the storage backend.
-    /// Responsible for database lifecycle, root history management, and global locking.
+    /// Represents the top-level façade over the storage backend.
+    /// It is responsible for the database lifecycle, root history management, and global locking.
     /// </summary>
     public class ObjectSpace
     {
-        // Shared storage abstraction used by all operations.
         internal SharedStorage Storage { get; }
-        // Simple state machine for open/close lifecycle.
         private string State { get; set; }
-        // Process-wide gate for serializing root updates.
         private readonly object _lock = new();
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ObjectSpace"/> class.
+        /// </summary>
+        /// <param name="storage">The storage backend to be used.</param>
         public ObjectSpace(SharedStorage storage)
         {
             Storage = storage ?? throw new ArgumentNullException(nameof(storage));
@@ -56,9 +57,11 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Opens an existing database by name. Throws if not found.
-        /// Thread-safe via ObjectSpace lock.
+        /// Opens an existing database by name.
         /// </summary>
+        /// <param name="databaseName">The name of the database to open.</param>
+        /// <returns>A <see cref="Database"/> instance.</returns>
+        /// <exception cref="ProtoValidationException">Thrown if the object space is not running or the database does not exist.</exception>
         public Database OpenDatabase(string databaseName)
         {
             if (databaseName is null) throw new ArgumentNullException(nameof(databaseName));
@@ -78,9 +81,11 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Creates a new database entry in the catalog and persists a new root snapshot.
-        /// Protected by the root locker to coordinate with other writers.
+        /// Creates a new database.
         /// </summary>
+        /// <param name="databaseName">The name of the new database.</param>
+        /// <returns>A <see cref="Database"/> instance for the newly created database.</returns>
+        /// <exception cref="ProtoValidationException">Thrown if the object space is not running or a database with the same name already exists.</exception>
         public Database NewDatabase(string databaseName)
         {
             if (databaseName is null) throw new ArgumentNullException(nameof(databaseName));
@@ -120,9 +125,11 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Renames an existing database. Fails if the source does not exist or the target already exists.
-        /// Persists a new root snapshot in the history.
+        /// Renames an existing database.
         /// </summary>
+        /// <param name="oldName">The current name of the database.</param>
+        /// <param name="newName">The new name for the database.</param>
+        /// <exception cref="ProtoValidationException">Thrown if the object space is not running, the old database does not exist, or the new name is already in use.</exception>
         public void RenameDatabase(string oldName, string newName)
         {
             if (oldName is null) throw new ArgumentNullException(nameof(oldName));
@@ -170,8 +177,10 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Removes a database by name and persists a new root snapshot.
+        /// Removes a database by name.
         /// </summary>
+        /// <param name="name">The name of the database to remove.</param>
+        /// <exception cref="ProtoValidationException">Thrown if the object space is not running or the database does not exist.</exception>
         public void RemoveDatabase(string name)
         {
             if (name is null) throw new ArgumentNullException(nameof(name));
@@ -206,10 +215,6 @@ namespace ProtoBaseNet
             }
         }
 
-        /// <summary>
-        /// Returns the current database catalog (dictionary) from the root object.
-        /// If none is present, returns an empty catalog.
-        /// </summary>
         private DbDictionary<object> ReadDbCatalog()
         {
             var spaceRoot = GetSpaceRoot();
@@ -218,21 +223,13 @@ namespace ProtoBaseNet
             return dict;
         }
 
-        /// <summary>
-        /// Creates a scoped lock and storage context for root modifications.
-        /// </summary>
         internal IDisposable GetRootLocker() => new SpaceContextManager(_lock, this);
 
-        /// <summary>
-        /// Loads the entire history list of root snapshots.
-        /// If the storage has no current root pointer, returns an empty list.
-        /// </summary>
         internal DbList<RootObject> GetSpaceHistory(bool lockHistory = false)
         {
             var readTr = new ObjectTransaction(objectSpace: this, storage: Storage);
             var rootPointer = Storage.ReadCurrentRoot();
 
-            // Presence of a pointer indicates an existing history.
             if (rootPointer is not null)
             {
                 var spaceHistory = new DbList<RootObject>(readTr, rootPointer);
@@ -243,9 +240,6 @@ namespace ProtoBaseNet
             return new DbList<RootObject>(readTr);
         }
 
-        /// <summary>
-        /// Returns the latest root object in the history, or a freshly initialized one.
-        /// </summary>
         internal RootObject GetSpaceRoot()
         {
             var readTr = new ObjectTransaction(objectSpace: this, storage: Storage);
@@ -257,9 +251,6 @@ namespace ProtoBaseNet
             return spaceHistory.GetAt(0)!;
         }
 
-        /// <summary>
-        /// Appends a new root snapshot to the history and updates the storage's current root pointer.
-        /// </summary>
         internal void SetSpaceRoot(RootObject newSpaceRoot)
         {
             var updateTr = new ObjectTransaction(objectSpace: this, storage: Storage);
@@ -272,9 +263,6 @@ namespace ProtoBaseNet
             Storage.SetCurrentRoot(newSpaceHistory.AtomPointer!);
         }
 
-        /// <summary>
-        /// Variant of SetSpaceRoot that reuses a preloaded history list under the same lock/transaction.
-        /// </summary>
         internal void SetSpaceRootLocked(RootObject newSpaceRoot, DbList<RootObject> currentHistory)
         {
             var updateTr = new ObjectTransaction(objectSpace: this, storage: Storage);
@@ -303,8 +291,8 @@ namespace ProtoBaseNet
     }
 
     /// <summary>
-    /// Database façade inside an ObjectSpace.
-    /// Provides transactional access to a single database root.
+    /// Represents a database within an <see cref="ObjectSpace"/>.
+    /// Provides transactional access to a single, isolated object graph.
     /// </summary>
     public class Database : IDisposable
     {
@@ -319,8 +307,9 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Begins a new transaction bound to this database.
+        /// Begins a new transaction to read or modify the database.
         /// </summary>
+        /// <returns>A new <see cref="ObjectTransaction"/>.</returns>
         public ObjectTransaction NewTransaction()
         {
             var dbRoot = ReadDbRoot();
@@ -330,6 +319,8 @@ namespace ProtoBaseNet
         /// <summary>
         /// Creates a new database (branch) and writes a creation timestamp in its root.
         /// </summary>
+        /// <param name="newDbName">The name of the new database branch.</param>
+        /// <returns>The newly created <see cref="Database"/>.</returns>
         public Database NewBranchDatabase(string newDbName)
         {
             var newDb = ObjectSpace.NewDatabase(newDbName);
@@ -340,16 +331,17 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Placeholder for time-travel: retrieve a database view at a given time.
+        /// Retrieves a view of the database at a specific point in time.
         /// </summary>
+        /// <param name="when">The timestamp to retrieve the state from.</param>
+        /// <param name="snapshotName">The name for the snapshot.</param>
+        /// <returns>A <see cref="Database"/> instance representing the state at the given time.</returns>
+        /// <remarks>This feature is not yet implemented.</remarks>
         public Database GetStateAt(DateTime when, string snapshotName)
         {
             throw new NotImplementedException();
         }
 
-        /// <summary>
-        /// Reads the current database root from the space root, or returns an empty root if not present.
-        /// </summary>
         internal DbDictionary<object> ReadDbRoot()
         {
             var readTr = new ObjectTransaction(this);
@@ -367,9 +359,6 @@ namespace ProtoBaseNet
             return new DbDictionary<object>(readTr);
         }
 
-        /// <summary>
-        /// Persists a new database root under this database name and updates the space root.
-        /// </summary>
         internal void SetDbRoot(DbDictionary<object> newDbRoot)
         {
             var updateTr = new ObjectTransaction(this);
@@ -386,6 +375,9 @@ namespace ProtoBaseNet
             updateTr.Abort();
         }
 
+        /// <summary>
+        /// Disposes the database instance. This does not close the underlying ObjectSpace.
+        /// </summary>
         public void Dispose()
         {
             State = "Closed";
@@ -393,8 +385,8 @@ namespace ProtoBaseNet
     }
 
     /// <summary>
-    /// Transaction boundary for reading/writing roots and atoms.
-    /// Tracks staged roots/literals and coordinates commit/abort with the object space.
+    /// Represents a transaction for reading and writing objects.
+    /// It tracks staged roots and literals and coordinates commit/abort operations.
     /// </summary>
     public class ObjectTransaction : IDisposable
     {
@@ -410,6 +402,9 @@ namespace ProtoBaseNet
         private ObjectSpace ObjectSpace { get; }
         internal SharedStorage Storage { get; }
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ObjectTransaction"/> class.
+        /// </summary>
         public ObjectTransaction(
             Database? database = null,
             ObjectSpace? objectSpace = null,
@@ -419,7 +414,6 @@ namespace ProtoBaseNet
         {
             EnclosingTransaction = enclosingTransaction;
             
-            // Wiring of context: either bound to a Database (preferred) or directly to an ObjectSpace.
             if (database is not null)
             {
                 Database = database;
@@ -437,14 +431,15 @@ namespace ProtoBaseNet
             Storage = storage ?? ObjectSpace.Storage;
             TransactionRoot = dbRoot;
             
-            // Staging areas for newly created or modified roots/literals within this transaction.
             NewRoots = new DbDictionary<object>(this);
             NewLiterals = new DbDictionary<object>(this);
         }
 
         /// <summary>
-        /// Reads a named root object from the transaction view (staged or base).
+        /// Gets a named root object from the transaction's view.
         /// </summary>
+        /// <param name="name">The name of the root object.</param>
+        /// <returns>The root <see cref="Atom"/>, or null if not found.</returns>
         public Atom? GetRootObject(string name)
         {
             if (name is null) throw new ArgumentNullException(nameof(name));
@@ -455,8 +450,10 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Stages a root object update and ensures the atom is saved within this transaction.
+        /// Stages an update for a named root object.
         /// </summary>
+        /// <param name="name">The name of the root object.</param>
+        /// <param name="value">The <see cref="Atom"/> to set as the root. If null, the root is removed.</param>
         public void SetRootObject(string name, Atom? value)
         {
             if (name is null) throw new ArgumentNullException(nameof(name));
@@ -482,10 +479,10 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Commits staged changes:
-        /// - If this is a top-level transaction, merges roots and updates the database root under a space lock.
-        /// - If nested, merges staged data into the enclosing transaction.
+        /// Commits the changes made in this transaction to the database.
+        /// If this is a nested transaction, changes are merged into the parent transaction.
         /// </summary>
+        /// <exception cref="ProtoValidationException">Thrown if the transaction is not in a running state.</exception>
         public void Commit()
         {
             lock (_lock)
@@ -515,7 +512,6 @@ namespace ProtoBaseNet
                 }
                 else
                 {
-                    // Propagate staged data upward for a single final commit at the top level.
                     EnclosingTransaction.NewRoots = EnclosingTransaction.NewRoots.Merge(NewRoots);
                     EnclosingTransaction.NewLiterals = EnclosingTransaction.NewLiterals.Merge(NewLiterals);
                 }
@@ -525,8 +521,9 @@ namespace ProtoBaseNet
         }
 
         /// <summary>
-        /// Aborts the transaction. No changes are pushed to the storage.
+        /// Aborts the transaction, discarding all changes.
         /// </summary>
+        /// <exception cref="ProtoValidationException">Thrown if the transaction is not in a running state.</exception>
         public void Abort()
         {
             lock (_lock)
@@ -538,9 +535,11 @@ namespace ProtoBaseNet
             }
         }
 
+        /// <summary>
+        /// Disposes the transaction. If the transaction is still running, it will be aborted.
+        /// </summary>
         public void Dispose()
         {
-            // Best-effort rollback if the user forgets to commit/abort.
             if (State == "Running")
             {
                 Abort();

@@ -3,39 +3,59 @@ namespace ProtoBaseNet;
 using System;
 using System.Collections.Generic;
 
-// Persistent, immutable list implemented as an AVL-like binary tree.
-// Key characteristics:
-// - Structural sharing: all mutating operations return a new DbList<T> instance,
-//   reusing unchanged subtrees to minimize allocations.
-// - Balanced tree: rotations keep height logarithmic, enabling O(log N) positional
-//   access (GetAt/SetAt/InsertAt/RemoveAt) and O(N) in-order iteration.
-// - Optional index container is plumbed through but not actively maintained;
-//   index updates can be connected where placeholders are indicated.
+/// <summary>
+/// An immutable, persistent list implemented as a balanced binary tree (AVL-like).
+/// </summary>
+/// <typeparam name="T">The type of elements in the list.</typeparam>
+/// <remarks>
+/// Key characteristics:
+/// - Structural sharing: all mutating operations return a new <see cref="DbList{T}"/> instance,
+///   reusing unchanged subtrees to minimize allocations.
+/// - Balanced tree: rotations keep height logarithmic, enabling O(log N) positional
+///   access (<see cref="GetAt"/>, <see cref="SetAt"/>, <see cref="InsertAt"/>, <see cref="RemoveAt"/>) and O(N) in-order iteration.
+/// </remarks>
 public class DbList<T> : DbCollection
 {
-    // Empty flag: true for a sentinel/empty node; false for a concrete node with Value.
+    /// <summary>
+    /// Gets a value indicating whether the list is empty.
+    /// </summary>
     public bool Empty { get; init; } = true;
 
-    // Node payload when not empty.
+    /// <summary>
+    /// Gets the value of the current node. Only valid if <see cref="Empty"/> is false.
+    /// </summary>
     public T? Value { get; init; }
 
-    // Cached height of the subtree rooted at this node (0 for Empty).
+    /// <summary>
+    /// Gets the height of the subtree rooted at this node.
+    /// </summary>
     public int Height { get; init; }
 
-    // Right child.
+    /// <summary>
+    /// Gets the right child of the node.
+    /// </summary>
     public DbList<T>? Next { get; init; }
 
-    // Left child.
+    /// <summary>
+    /// Gets the left child of the node.
+    /// </summary>
     public DbList<T>? Previous { get; init; }
 
-    // Optional: container of indexes (placeholder to mirror the reference design).
     private DbDictionary<object>? _indexes;
+    /// <summary>
+    /// Gets the dictionary of indexes associated with this collection.
+    /// </summary>
     public DbDictionary<object>? Indexes => _indexes;
 
-    // Total number of elements in the subtree (0 for Empty).
-    public int Count { get; init; }
+    /// <summary>
+    /// Gets the total number of elements in the list.
+    /// </summary>
+    public new int Count { get; init; }
 
-    // Constructs a node, normalizing empty children to null and computing derived fields (Count, Height, Empty).
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DbList{T}"/> class.
+    /// This constructor is used to create nodes in the tree.
+    /// </summary>
     public DbList(
         T? value = default,
         bool empty = true,
@@ -43,7 +63,6 @@ public class DbList<T> : DbCollection
         DbList<T>? previous = null,
         DbDictionary<object>? indexes = null)
     {
-        // Normalize "empty" children to null to simplify tree logic.
         if (previous is { Empty: true }) previous = null;
         if (next is { Empty: true }) next = null;
 
@@ -82,7 +101,6 @@ public class DbList<T> : DbCollection
         }
     }
 
-    // Creates a new node with the provided properties while carrying forward indexes by default.
     private DbList<T> With(
         T? value,
         bool empty,
@@ -99,7 +117,10 @@ public class DbList<T> : DbCollection
         );
     }
 
-    // In-order enumeration of all values.
+    /// <summary>
+    /// Returns an enumerable that iterates through the list in order.
+    /// </summary>
+    /// <returns>An <see cref="IEnumerable{T}"/> for the list.</returns>
     public IEnumerable<T?> AsIterable()
     {
         foreach (var v in Scan(this))
@@ -122,8 +143,11 @@ public class DbList<T> : DbCollection
         }
     }
 
-    // Returns the value at an index; supports negative offsets (from the end).
-    // O(log N) due to subtree counts cached at each node.
+    /// <summary>
+    /// Gets the element at the specified index.
+    /// </summary>
+    /// <param name="offset">The zero-based index of the element to get. Negative offsets are counted from the end of the list.</param>
+    /// <returns>The element at the specified index, or default(T) if the index is out of range.</returns>
     public T? GetAt(int offset)
     {
         if (Empty) return default;
@@ -152,7 +176,6 @@ public class DbList<T> : DbCollection
         return default;
     }
 
-    // Balance factor = height(right) - height(left). Used to decide rotations.
     private int BalanceFactor()
     {
         if (Empty) return 0;
@@ -161,7 +184,6 @@ public class DbList<T> : DbCollection
         return hR - hL;
     }
 
-    // Right rotation around this node. Returns the new subtree root.
     private DbList<T> RightRotation()
     {
         if (Previous is null) return this;
@@ -183,7 +205,6 @@ public class DbList<T> : DbCollection
         );
     }
 
-    // Left rotation around this node. Returns the new subtree root.
     private DbList<T> LeftRotation()
     {
         if (Next is null) return this;
@@ -205,8 +226,6 @@ public class DbList<T> : DbCollection
         );
     }
 
-    // Rebalances the subtree by recursively rebalancing heavy children and
-    // applying single/double rotations based on the local balance factor.
     private DbList<T> Rebalance()
     {
         var node = this;
@@ -268,8 +287,13 @@ public class DbList<T> : DbCollection
         return node;
     }
 
-    // Sets the value at an index or appends at Count if offset equals Count.
-    // Returns a new rebalanced list.
+    /// <summary>
+    /// Returns a new list with the element at the specified index replaced by the new value.
+    /// </summary>
+    /// <param name="offset">The zero-based index of the element to replace.</param>
+    /// <param name="value">The new value for the element.</param>
+    /// <returns>A new list with the element replaced.</returns>
+    /// <exception cref="IndexOutOfRangeException">Thrown if the offset is out of range.</exception>
     public DbList<T>? SetAt(int offset, T? value)
     {
         if (offset < 0) offset = Count + offset;
@@ -358,8 +382,12 @@ public class DbList<T> : DbCollection
         );
     }
 
-    // Inserts a value at a given position, shifting subsequent items right.
-    // Supports negative offsets; out-of-range values are clamped to [0, Count].
+    /// <summary>
+    /// Inserts an element into the list at the specified index.
+    /// </summary>
+    /// <param name="offset">The zero-based index at which the element should be inserted.</param>
+    /// <param name="value">The element to insert.</param>
+    /// <returns>A new list with the element inserted.</returns>
     public DbList<T> InsertAt(int offset, T? value)
     {
         if (offset < 0) offset = Count + offset;
@@ -421,7 +449,6 @@ public class DbList<T> : DbCollection
         }
         else
         {
-            // Insert before the current value by splitting the node.
             newNode = new DbList<T>(
                 value: value,
                 empty: false,
@@ -443,7 +470,11 @@ public class DbList<T> : DbCollection
         );
     }
 
-    // Removes the value at a given index and returns a rebalanced list.
+    /// <summary>
+    /// Removes the element at the specified index.
+    /// </summary>
+    /// <param name="offset">The zero-based index of the element to remove.</param>
+    /// <returns>A new list with the element removed.</returns>
     public DbList<T> RemoveAt(int offset)
     {
         if (offset < 0) offset = Count + offset;
@@ -496,7 +527,6 @@ public class DbList<T> : DbCollection
         }
         else
         {
-            // Remove this node by promoting successor or predecessor.
             if (Next is not null && !Next.Empty)
             {
                 var firstValue = Next.GetAt(0);
@@ -523,7 +553,6 @@ public class DbList<T> : DbCollection
             }
             else
             {
-                // Leaf removal yields an empty list.
                 return new DbList<T>(indexes: _indexes);
             }
         }
@@ -540,7 +569,10 @@ public class DbList<T> : DbCollection
         );
     }
 
-    // Removes the first element and returns the updated list.
+    /// <summary>
+    /// Removes the first element from the list.
+    /// </summary>
+    /// <returns>A new list with the first element removed.</returns>
     public DbList<T> RemoveFirst()
     {
         if (Empty) return this;
@@ -573,7 +605,10 @@ public class DbList<T> : DbCollection
         }
     }
 
-    // Removes the last element and returns the updated list.
+    /// <summary>
+    /// Removes the last element from the list.
+    /// </summary>
+    /// <returns>A new list with the last element removed.</returns>
     public DbList<T> RemoveLast()
     {
         if (Empty) return this;
@@ -606,7 +641,11 @@ public class DbList<T> : DbCollection
         }
     }
 
-    // Appends all elements of another list (in-order) to the end of this list.
+    /// <summary>
+    /// Appends all elements of another list to the end of this list.
+    /// </summary>
+    /// <param name="items">The list of items to append.</param>
+    /// <returns>A new list containing the elements of this list followed by the elements of the other list.</returns>
     public DbList<T> Extend(DbList<T>? items)
     {
         var result = this;
@@ -618,11 +657,25 @@ public class DbList<T> : DbCollection
         return result;
     }
 
-    // Convenience appenders.
+    /// <summary>
+    /// Appends an item to the beginning of the list.
+    /// </summary>
+    /// <param name="item">The item to append.</param>
+    /// <returns>A new list with the item appended to the beginning.</returns>
     public DbList<T> AppendFirst(T? item) => InsertAt(0, item);
+
+    /// <summary>
+    /// Appends an item to the end of the list.
+    /// </summary>
+    /// <param name="item">The item to append.</param>
+    /// <returns>A new list with the item appended to the end.</returns>
     public DbList<T> AppendLast(T? item) => InsertAt(Count, item);
 
-    // Returns the prefix of the list up to upperLimit (exclusive).
+    /// <summary>
+    /// Returns a new list containing the first <paramref name="upperLimit"/> elements.
+    /// </summary>
+    /// <param name="upperLimit">The number of elements to take from the beginning of the list.</param>
+    /// <returns>A new list containing the specified number of elements from the beginning of the list.</returns>
     public DbList<T> Head(int upperLimit)
     {
         if (upperLimit < 0) upperLimit = Count + upperLimit;
@@ -663,7 +716,11 @@ public class DbList<T> : DbCollection
         return node.Rebalance();
     }
 
-    // Returns the suffix of the list starting at lowerLimit (inclusive).
+    /// <summary>
+    /// Returns a new list containing the elements from the specified lower limit to the end of the list.
+    /// </summary>
+    /// <param name="lowerLimit">The zero-based index at which to begin the slice.</param>
+    /// <returns>A new list containing the elements from the specified lower limit to the end.</returns>
     public DbList<T> Tail(int lowerLimit)
     {
         if (lowerLimit < 0) lowerLimit = Count + lowerLimit;
@@ -710,7 +767,12 @@ public class DbList<T> : DbCollection
         return node.Rebalance();
     }
 
-    // Returns a sublist in [fromOffset, toOffset) (start inclusive, end exclusive).
+    /// <summary>
+    /// Returns a slice of the list.
+    /// </summary>
+    /// <param name="fromOffset">The zero-based index at which to begin the slice.</param>
+    /// <param name="toOffset">The zero-based index before which to end the slice.</param>
+    /// <returns>A new list that represents the specified slice of the original list.</returns>
     public DbList<T> Slice(int fromOffset, int toOffset)
     {
         if (fromOffset < 0) fromOffset = Count + fromOffset;
@@ -735,8 +797,6 @@ public class DbList<T> : DbCollection
         return Tail(fromOffset).Head(toOffset - fromOffset);
     }
 
-    // Minimal placeholder hooks for index integration, mirroring the reference template.
-    // Connect these to a real indexing infrastructure if/when available.
     private DbDictionary<object>? Add2Indexes(T? value) => _indexes;
     private DbDictionary<object>? RemoveFromIndexes(T? value) => _indexes;
 }

@@ -4,35 +4,34 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-// Ordered, durable dictionary for Atom-backed storage.
-// Key ordering is deterministic across heterogeneous key types via OrderKey normalization.
-// Internals use a sorted List with binary search; operations are O(log N) for lookup/insert/remove.
+/// <summary>
+/// An immutable, ordered, and durable dictionary for Atom-backed storage.
+/// </summary>
+/// <typeparam name="T">The type of values in the dictionary.</typeparam>
+/// <remarks>
+/// Key ordering is deterministic across heterogeneous key types via OrderKey normalization.
+/// Internals use a sorted List with binary search, so operations are O(log N) for lookup, insert, and remove.
+/// </remarks>
 public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>>
 {
-    private const string KeyNullMessage = "Key no puede ser null.";
+    private const string KeyNullMessage = "Key cannot be null.";
     private const string TypeBool = "bool";
     private const string TypeNumber = "number";
     private const string TypeString = "str";
     private const string TypeBytes = "bytes";
 
-    // Stable item wrapper with total ordering for storage and search.
-    // CompareTo implements a two-stage comparison:
-    // 1) type-group (bool/number/str/bytes)
-    // 2) normalized payload comparison (IComparable, byte[] lexicographic, or string fallback)
     private sealed class DictionaryItem : IComparable<DictionaryItem>
     {
         public object Key { get; private set; }
         public T Value { get; private set; }
 
-        /*START_USER_CODE*/public DictionaryItem(object key, T value)
+        public DictionaryItem(object key, T value)
         {
             ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
             Key = key;
             Value = value;
         }
-        /*END_USER_CODE*/
 
-        // Probe item used for binary search without allocating a real value payload.
         public static DictionaryItem CreateProbe(object key)
         {
             ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -48,8 +47,6 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
             var gcmp = string.CompareOrdinal(g1, g2);
             if (gcmp != 0) return gcmp;
 
-            // Normalized payload comparison
-            // Fast path: direct IComparable if possible
             if (n1 is IComparable c1 && n2 is not null)
             {
                 try
@@ -59,11 +56,10 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
                 }
                 catch
                 {
-                    // Fall through to alternate strategies
+                    // Fall through
                 }
             }
 
-            // Byte array lexicographic ordering
             if (n1 is byte[] a1 && n2 is byte[] a2)
             {
                 var len = Math.Min(a1.Length, a2.Length);
@@ -75,22 +71,20 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
                 return a1.Length.CompareTo(a2.Length);
             }
 
-            // Final fallback: ordinal string comparison of normalized values
             var s1 = n1?.ToString() ?? string.Empty;
             var s2 = n2?.ToString() ?? string.Empty;
             return string.CompareOrdinal(s1, s2);
         }
     }
 
-    // Internal sorted storage and an operation log (optional auditing/diagnostics).
     private readonly List<DictionaryItem> _content = new();
     private readonly List<(string op, object key, T? value)> _opLog = new();
 
-    // Number of entries (unique keys).
-    public int Count => _content.Count;
-    /*START_USER_CODE*/
-    // Produces a deterministic ordering key as (group, normalized-value).
-    // Groups guarantee cross-type ordering; normalization enables consistent comparisons within a group.
+    /// <summary>
+    /// Gets the number of key-value pairs contained in the dictionary.
+    /// </summary>
+    public new int Count => _content.Count;
+
     private static (string group, object? norm) OrderKey(object key)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -98,22 +92,17 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
         switch (key)
         {
             case bool b:
-                // false < true
                 return (TypeBool, b);
             case sbyte or byte or short or ushort or int or uint or long or ulong or nint or nuint:
-                // Prefer decimal for wide, precise integer ordering; fall back to double for ranges decimal can't cover.
                 try
                 {
-                    var dec = Convert.ToDecimal(key);
-                    return (TypeNumber, dec);
+                    return (TypeNumber, Convert.ToDecimal(key));
                 }
                 catch
                 {
-                    var dbl = Convert.ToDouble(key);
-                    return (TypeNumber, dbl);
+                    return (TypeNumber, Convert.ToDouble(key));
                 }
             case float or double or decimal:
-                // Normalize decimals as decimal; floating types as double.
                 if (key is decimal m) return (TypeNumber, m);
                 return (TypeNumber, Convert.ToDouble(key));
             case string s:
@@ -125,13 +114,10 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
             case byte[] bytes:
                 return (TypeBytes, bytes);
             default:
-                // Fallback: stable string representation for unknown types.
                 return (TypeString, key.ToString() ?? string.Empty);
         }
     }
-    /*END_USER_CODE*/
 
-    // Binary search by normalized key; returns index if found or bitwise complement of insertion index.
     private int FindIndex(object key)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -145,11 +131,9 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
             var item = _content[center];
             var itemOk = OrderKey(item.Key);
 
-            // Strict equality: same group, same normalized value, and exact key equality
             if (itemOk.group == targetOk.group && Equals(itemOk.norm, targetOk.norm) && Equals(item.Key, key))
                 return center;
 
-            // Navigate by group first
             int cmpGroup = string.CompareOrdinal(itemOk.group, targetOk.group);
             if (cmpGroup > 0)
             {
@@ -162,7 +146,6 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
                 continue;
             }
 
-            // Same group: compare normalized values
             int cmpNorm;
             if (itemOk.norm is IComparable c && itemOk.norm?.GetType() == targetOk.norm?.GetType())
             {
@@ -182,23 +165,29 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
                 cmpNorm = string.CompareOrdinal(itemOk.norm?.ToString() ?? string.Empty, targetOk.norm?.ToString() ?? string.Empty);
             }
 
-            // If current >= target, move left; otherwise right.
             if (cmpNorm >= 0) right = center - 1;
             else left = center + 1;
         }
 
-        // Not found; bitwise complement yields the insertion position.
         return ~left;
     }
 
-    // Membership check by key using binary search.
+    /// <summary>
+    /// Determines whether the dictionary contains the specified key.
+    /// </summary>
+    /// <param name="key">The key to locate.</param>
+    /// <returns>True if the dictionary contains an element with the specified key; otherwise, false.</returns>
     public bool Has(object key)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
         return FindIndex(key) >= 0;
     }
 
-    // Retrieves value by key or default(T) if not present.
+    /// <summary>
+    /// Gets the value associated with the specified key.
+    /// </summary>
+    /// <param name="key">The key of the value to get.</param>
+    /// <returns>The value associated with the specified key, or default(T) if the key is not found.</returns>
     public T? GetAt(object key)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -207,8 +196,13 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
         return default;
     }
 
-    // Inserts or replaces the value for the given key, preserving sorted order.
-    // Records a "set" operation in the op-log for auditing.
+    /// <summary>
+    /// Returns a new dictionary with the specified key and value set.
+    /// If the key already exists, its value is replaced.
+    /// </summary>
+    /// <param name="key">The key of the element to set.</param>
+    /// <param name="value">The value to associate with the key.</param>
+    /// <returns>A new dictionary with the key-value pair set.</returns>
     public DbDictionary<T> SetAt(object key, T value)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -228,8 +222,11 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
         return this;
     }
 
-    // Removes the entry for the given key if present.
-    // Records a "remove" operation in the op-log for auditing.
+    /// <summary>
+    /// Returns a new dictionary with the element with the specified key removed.
+    /// </summary>
+    /// <param name="key">The key of the element to remove.</param>
+    /// <returns>A new dictionary with the specified element removed.</returns>
     public DbDictionary<T> RemoveAt(object key)
     {
         ArgumentNullException.ThrowIfNull(key, KeyNullMessage);
@@ -243,14 +240,20 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
         return this;
     }
 
-    // Yields (key, value) pairs in sorted key order.
+    /// <summary>
+    /// Returns an enumerable that iterates through the dictionary in sorted key order.
+    /// </summary>
+    /// <returns>An enumerable of key-value pairs.</returns>
     public IEnumerable<(object key, T value)> AsIterable()
     {
         foreach (var item in _content)
             yield return (item.Key, item.Value);
     }
 
-    // IEnumerable<KeyValuePair<object,T>> implementation for foreach and LINQ.
+    /// <summary>
+    /// Returns an enumerator that iterates through the collection.
+    /// </summary>
+    /// <returns>An enumerator that can be used to iterate through the collection.</returns>
     public IEnumerator<KeyValuePair<object, T>> GetEnumerator()
     {
         foreach (var item in _content)
@@ -259,6 +262,11 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<object, T>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    // Convenience overload to support string keys without casting at call sites.
+    /// <summary>
+    /// Convenience overload to support string keys without casting at call sites.
+    /// </summary>
+    /// <param name="key">The string key of the element to set.</param>
+    /// <param name="value">The value to associate with the key.</param>
+    /// <returns>A new dictionary with the key-value pair set.</returns>
     public DbDictionary<T> SetAt(string key, T value) => SetAt((object)key, value);
 }
