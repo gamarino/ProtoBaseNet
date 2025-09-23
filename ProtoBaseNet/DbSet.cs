@@ -20,7 +20,8 @@ using System.Text;
 /// </remarks>
 public class DbSet<T> : DbCollection, IEnumerable<T>
 {
-    private DbHashDictionary<T> Content = new();
+    private DbHashDictionary<T> Content { get; set; }
+    private HashSet<T> _temporaryContent { get; init; }
 
     /// <summary>
     /// Gets the total number of elements in the set, including staged and persisted elements.
@@ -30,24 +31,34 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// <summary>
     /// Initializes a new instance of the <see cref="DbSet{T}"/> class.
     /// </summary>
-    public DbSet() { }
-
-    public DbSet(IEnumerable<T> items)
+    public DbSet(IEnumerable<T> initialItems)
     {
         var newSet = new DbSet<T>();
-        foreach (var item in items)
+        foreach (var item in initialItems)
+        {
             newSet = newSet.Add(item);
-        
+        }
+
         Content = newSet.Content;
+        _temporaryContent = newSet._temporaryContent;
     }
 
     private DbSet(
-        DbHashDictionary<T> content, 
-        DbDictionary<Index>? indexes,
-        Guid stableId,
-        ObjectTransaction? transaction) : base(stableId, indexes, transaction)
+        DbHashDictionary<T>? content = null, 
+        HashSet<T>? temporaryContent = null,
+        DbDictionary<Index>? indexes = null,
+        Guid? stableId = null,
+        ObjectTransaction? transaction = null) : base(stableId, indexes, transaction)
     {
-        Content = content;
+        if (content != null)
+            Content = content;
+        else
+            Content = new();
+
+        if (temporaryContent != null)
+            _temporaryContent = temporaryContent;
+        else
+            _temporaryContent = new HashSet<T>();
     }
 
     private static int StableHash(object? key)
@@ -97,8 +108,12 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// <returns>True if the element is in the set, otherwise false.</returns>
     public bool Has(T key)
     {
+        if (key is null) return false;
         var h = StableHash(key!);
-        return Content.Has(h);
+        if (Content.Has(h)) return true;
+        if ((key is Atom) && (key as Atom).Transaction == null)
+            return _temporaryContent.Contains(key);
+        return false;
     }
 
     /// <summary>
@@ -109,10 +124,19 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     public DbSet<T> Add(T key)
     {
         if (Has(key)) return this;
+        
+        if (key is Atom && (key as Atom).Transaction == null)
+        {
+            if (_temporaryContent.Contains(key))
+                return this;
+            var newTemporaryContent = _temporaryContent;
+            newTemporaryContent.Add(key);
+            return new DbSet<T>(Content, newTemporaryContent, Indexes, StableId, Transaction);
+        }
 
-        var h = StableHash(key!);
+        var h = StableHash(key);
         var newContent = Content.SetAt(h, key);
-        return new DbSet<T>(newContent, Indexes, StableId, Transaction);
+        return new DbSet<T>(newContent, _temporaryContent, Indexes, StableId, Transaction);
     }
 
     /// <summary>
@@ -124,6 +148,14 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     {
         var h = StableHash(key!);
         if (!Has(key)) return this;
+        if (key is Atom && (key as Atom).Transaction == null)
+        {
+            if (!_temporaryContent.Contains(key))
+                return this;
+            var newTemporaryContent = _temporaryContent;
+            newTemporaryContent.Remove(key);
+            return new DbSet<T>(Content, newTemporaryContent, Indexes, StableId, Transaction);
+        }
 
         var newContent = Content;
 
@@ -131,7 +163,7 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         {
             newContent = newContent.RemoveAt(h);
             var newIndexes = ObjectRemoveFromIndexes(key);
-            return new DbSet<T>(newContent, newIndexes, StableId, Transaction);
+            return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction);
         }
         else
             return this;
@@ -142,9 +174,16 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// </summary>
     internal override void Save()
     {
-        Content.Save();
-        Indexes?.Save();
-        base.Save();
+        if (AtomPointer == null)
+        {
+            foreach (var item in _temporaryContent)
+                Content = Content.SetAt(StableHash(item), item);
+            _temporaryContent.Clear();
+            
+            Content.Save();
+            Indexes?.Save();
+            base.Save();
+        }
     }
 
     /// <summary>
@@ -194,7 +233,10 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     
     public IEnumerator<T> GetEnumerator()
     {
-        return Content.GetEnumerator();
+        foreach (var item in Content)
+            yield return item;
+        foreach (var item in _temporaryContent)
+            yield return item;
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

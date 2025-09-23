@@ -19,27 +19,27 @@ public class DbHashDictionary<T> : DbCollection, IEnumerable<T>
     /// <summary>
     /// Gets the key of the node. Null for an empty/sentinel node.
     /// </summary>
-    public int? Key { get; init; }
+    int? Key { get; init; }
 
     /// <summary>
     /// Gets the value of the node. Only meaningful if Key is not null.
     /// </summary>
-    public T? Value { get; init; }
+    T? Value { get; init; }
 
     /// <summary>
     /// Gets the cached height of the subtree.
     /// </summary>
-    public int Height { get; init; }
+    int Height { get; init; }
 
     /// <summary>
     /// Gets the right child (keys greater than the current key).
     /// </summary>
-    public DbHashDictionary<T>? Next { get; init; }
+    DbHashDictionary<T>? Next { get; init; }
 
     /// <summary>
     /// Gets the left child (keys less than the current key).
     /// </summary>
-    public DbHashDictionary<T>? Previous { get; init; }
+    DbHashDictionary<T>? Previous { get; init; }
 
     /// <summary>
     /// Gets the cached number of nodes in the subtree.
@@ -81,32 +81,6 @@ public class DbHashDictionary<T> : DbCollection, IEnumerable<T>
         else
         {
             Height = 0;
-        }
-    }
-
-    /// <summary>
-    /// Returns an enumerable that iterates through the dictionary in key-sorted order.
-    /// </summary>
-    /// <returns>An enumerable of key-value pairs.</returns>
-    public IEnumerable<(int key, T? value)> AsIterable()
-    {
-        foreach (var kv in Scan(this))
-            yield return kv;
-
-        static IEnumerable<(int, T?)> Scan(DbHashDictionary<T> node)
-        {
-            if (node.Previous is not null)
-            {
-                foreach (var x in Scan(node.Previous))
-                    yield return x;
-            }
-            if (node.Key is int k)
-                yield return (k, node.Value);
-            if (node.Next is not null)
-            {
-                foreach (var x in Scan(node.Next))
-                    yield return x;
-            }
         }
     }
 
@@ -427,8 +401,8 @@ public class DbHashDictionary<T> : DbCollection, IEnumerable<T>
     public DbHashDictionary<T> Merge(DbHashDictionary<T> other)
     {
         var result = this;
-        foreach (var (k, v) in other.AsIterable())
-            result = result.SetAt(k, v);
+        foreach (var key in other.GetKeys())
+            result = result.SetAt(key, other.GetAt(key));
         return result;
     }
 
@@ -466,6 +440,23 @@ public class DbHashDictionary<T> : DbCollection, IEnumerable<T>
         throw new ProtoCorruptionException("get_last traversal inconsistency");
     }
 
+    public IEnumerable<int> GetKeys()
+    {
+        if (Key is null) yield break;
+        
+        if (Previous is not null)
+            foreach (var key in Previous.GetKeys())
+                yield return key;
+
+        if (Key is not null)
+            yield return Key.Value;
+
+        if (Next is not null)
+            foreach (var key in Next.GetKeys())
+                yield return key;
+    }
+
+
     public IEnumerator<T> GetEnumerator()
     {
         if (Key is null) yield break;
@@ -482,6 +473,24 @@ public class DbHashDictionary<T> : DbCollection, IEnumerable<T>
                 yield return item;
     }
 
+    void Save()
+    {
+        if (AtomPointer is null)
+        {
+            if (Transaction is null)
+                throw new InvalidOperationException("Cannot save without Transaction");
+            if (Previous is not null)
+                Previous.Save();
+            if (Next is not null)
+                Next.Save();
+            if (Key is not null && (Value is Atom valueAsAtom))
+                valueAsAtom.Save();
+            
+            base.Save();
+        }
+    }
+    
+    
     IEnumerator IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
