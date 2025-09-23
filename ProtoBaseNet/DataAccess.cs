@@ -102,14 +102,14 @@ namespace ProtoBaseNet
                     var currentRoot = currentHist.Count > 0
                         ? (RootObject)currentHist.GetAt(0)!
                         : new RootObject(
-                            objectRoot: new DbDictionary<object>(updateTr),
-                            literalRoot: new DbDictionary<object>(updateTr),
+                            objectRoot: new DbDictionary<object>(transaction: updateTr),
+                            literalRoot: new DbDictionary<object>(transaction: updateTr),
                             transaction: updateTr);
 
                     var databases = currentRoot.ObjectRoot as DbDictionary<object>;
                     if (databases == null || !databases.Has(databaseName))
                     {
-                        var newDatabases = databases.SetAt(databaseName, new DbDictionary<object>(updateTr));
+                        var newDatabases = databases.SetAt(databaseName, new DbDictionary<object>(transaction: updateTr));
                         var newSpaceRoot = new RootObject(newDatabases, currentRoot.LiteralRoot, updateTr);
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
@@ -148,8 +148,8 @@ namespace ProtoBaseNet
                     var currentRoot = currentHist.Count > 0
                         ? (RootObject)currentHist.GetAt(0)!
                         : new RootObject(
-                            objectRoot: new DbDictionary<object>(updateTr),
-                            literalRoot: new DbDictionary<object>(updateTr),
+                            objectRoot: new DbDictionary<object>(transaction: updateTr),
+                            literalRoot: new DbDictionary<object>(transaction: updateTr),
                             transaction: updateTr);
 
                     var databases = currentRoot.ObjectRoot as DbDictionary<object>;
@@ -248,7 +248,10 @@ namespace ProtoBaseNet
             var spaceHistory = GetSpaceHistory();
 
             if (spaceHistory.Count == 0)
-                return new RootObject(new DbDictionary<object>(readTr), new DbDictionary<object>(readTr), readTr);
+                return new RootObject(
+                    objectRoot: new DbDictionary<object>(transaction: readTr), 
+                    literalRoot: new DbDictionary<object>(transaction: readTr), 
+                    transaction: readTr);
 
             return spaceHistory.GetAt(0)!;
         }
@@ -347,7 +350,7 @@ namespace ProtoBaseNet
                 }
             }
 
-            return new DbDictionary<object>(readTr);
+            return new DbDictionary<object>(transaction: readTr);
         }
 
         internal void SetDbRoot(DbDictionary<object> newDbRoot)
@@ -357,7 +360,8 @@ namespace ProtoBaseNet
             initialRoot.Transaction = updateTr;
             initialRoot.Load();
 
-            var currentObjectRoot = initialRoot.ObjectRoot as DbDictionary<object> ?? new DbDictionary<object>(updateTr);
+            var currentObjectRoot = initialRoot.ObjectRoot as DbDictionary<object> ?? 
+                                    new DbDictionary<object>(transaction: updateTr);
             var newObjectRoot = currentObjectRoot.SetAt(DatabaseName, newDbRoot);
             var newSpaceRoot = new RootObject(newObjectRoot, initialRoot.LiteralRoot, updateTr);
             newSpaceRoot.Save();
@@ -471,8 +475,8 @@ namespace ProtoBaseNet
             Storage = storage ?? ObjectSpace.Storage;
             TransactionRoot = dbRoot;
             
-            NewRoots = new DbDictionary<object>(this);
-            NewLiterals = new DbDictionary<object>(this);
+            NewRoots = new DbDictionary<object>(transaction: this);
+            NewLiterals = new DbDictionary<object>(transaction: this);
         }
 
         /// <summary>
@@ -514,7 +518,7 @@ namespace ProtoBaseNet
                 }
                 else
                 {
-                    TransactionRoot = new DbDictionary<object>(this).SetAt(name, value!);
+                    TransactionRoot = new DbDictionary<object>(transaction: this).SetAt(name, value!);
                 }
             }
         }
@@ -536,7 +540,7 @@ namespace ProtoBaseNet
             var currentDbRoot = Database!.ReadDbRoot();
             var result = NewRoots;
 
-            foreach (var (k, v) in NewRoots.AsIterable())
+            foreach (var (k, v) in NewRoots)
             {
                 var key = (string)k;
                 var stagedAtom = v as Atom;
@@ -578,7 +582,7 @@ namespace ProtoBaseNet
                 var currentDbRoot = Database!.ReadDbRoot();
                 var newDbRoot = currentDbRoot;
 
-                foreach (var (k, v) in reconciledNewRoots.AsIterable())
+                foreach (var (k, v) in reconciledNewRoots)
                 {
                     var key = (string)k;
                     var stagedAtom = v as Atom;

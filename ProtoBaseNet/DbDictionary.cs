@@ -160,6 +160,17 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
         return false;
     }
 
+    public DbDictionary<T> Merge(DbDictionary<T> other)
+    {
+        var newDictionary = this;
+        foreach (var newItem in other)
+        {
+            newDictionary = newDictionary.SetAt(newItem.Key, newItem.Value);
+        }
+
+        return newDictionary;
+    }
+
     public IEnumerator<KeyValuePair<string, T>> GetEnumerator()
     {
         foreach (var item in Content)
