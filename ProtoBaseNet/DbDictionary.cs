@@ -12,7 +12,7 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
     private readonly DbList<KeyValuePair<string, T>> Content;
     private readonly List<(string op, string key, T? value)> _opLog;
     
-    internal DbDictionary(
+    public DbDictionary(
         DbList<KeyValuePair<string, T>>? content = null,
         List<(string op, string key, T? value)>? opLog = null,
         Guid? stableId = null,

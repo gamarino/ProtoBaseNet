@@ -64,7 +64,7 @@ namespace MainTests
         {
             var items = new List<string> { "c", "a", "b" };
             var set = new DbSet<string>(items);
-            var list = new List<string>(set.AsIterable());
+            var list = new List<string>(set);
             
             // Order is not guaranteed in a set, so we sort for comparison
             list.Sort();
