@@ -1,6 +1,7 @@
 namespace ProtoBaseNet;
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
@@ -13,40 +14,53 @@ using System.Collections.Generic;
 /// - <see cref="UniqueCount"/> reflects the number of unique items.
 /// - <see cref="TotalCount"/> reflects the total number of occurrences of all items.
 /// </remarks>
-public class DbCountedSet<T> : DbCollection
+public class DbCountedSet<T> : DbCollection, IEnumerable<T>
 {
-    private readonly DbDictionary<T> Values;
-    private readonly DbDictionary<int> Counters;
+    private readonly DbHashDictionary<T> Values;
+    private readonly DbHashDictionary<int> Counters;
 
     public int UniqueCount => Values.Count;
 
-    public DbCountedSet()
+    public DbCountedSet(List<T> items)
     {
-        Values = new DbDictionary<T>();
-        Counters = new DbDictionary<int>();
+        var newCountedSet = new DbCountedSet<T>();
+
+        foreach (var item in items)
+        {
+            newCountedSet = newCountedSet.Add(item);       
+        }
+
+        Values = newCountedSet.Values;
+        Counters = newCountedSet.Counters;
     }
 
     public DbCountedSet(
-        DbDictionary<T> values,
-        DbDictionary<int> counters,
+        DbHashDictionary<T>? values = null,
+        DbHashDictionary<int>? counters = null,
         Guid? collectionId = null,
         ObjectTransaction? transaction = null,
         AtomPointer? atomPointer = null,
         DbDictionary<Index>? indexes = null)
         : base(collectionId, indexes, transaction, atomPointer)
     {
-        Values = values;
-        Counters = counters;
-        Indexes = indexes;
+        if (values is null) 
+            values = new DbHashDictionary<T>();
+        else
+            Values = values;
+        
+        if (counters is null) 
+            counters = new DbHashDictionary<int>();
+        else
+            Counters = counters;
     }
 
-    public IEnumerable<T> AsIterable()
+    public IEnumerator<T> GetEnumerator()
     {
-        foreach (var (_, value) in Values.AsIterable())
+        foreach (var value in Values)
             yield return value;
     }
 
-    public IEnumerator<T> GetEnumerator() => AsIterable().GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     public bool Has(T key)
     {
@@ -57,7 +71,7 @@ public class DbCountedSet<T> : DbCollection
     public int GetCount(T key)
     {
         var h = HashOf(key);
-        if (Counters.TryGetValue(h, out var count)) return count;
+        if (Counters.Has(h)) return Counters.GetAt(h);
         return 0;
     }
 
@@ -66,7 +80,7 @@ public class DbCountedSet<T> : DbCollection
         get
         {
             var total = 0;
-            foreach (var (_, cnt) in Counters.AsIterable())
+            foreach (var cnt in Counters)
             {
                 try { total += Convert.ToInt32(cnt); } catch { /* ignore */ }
             }
@@ -105,7 +119,7 @@ public class DbCountedSet<T> : DbCollection
         return new DbCountedSet<T>(newItems, newCounts, StableId, Transaction, AtomPointer, Indexes);
     }
 
-    private object HashOf(T key)
+    private int HashOf(T key)
     {
         try
         {
@@ -116,30 +130,9 @@ public class DbCountedSet<T> : DbCollection
                     return ap.GetHashCode();
                 return atom.GetHashCode();
             }
-
-            if (key is string s)
+            else
             {
-                using var sha = System.Security.Cryptography.SHA256.Create();
-                var bytes = System.Text.Encoding.UTF8.GetBytes(s);
-                var hash = sha.ComputeHash(bytes);
-                return BitConverter.ToString(hash);
-            }
-
-            if (key is IFormattable || key is bool)
-            {
-                var typed = $"{key.GetType().Name}:{key}";
-                using var sha = System.Security.Cryptography.SHA256.Create();
-                var bytes = System.Text.Encoding.UTF8.GetBytes(typed);
-                var hash = sha.ComputeHash(bytes);
-                return BitConverter.ToString(hash);
-            }
-
-            var repr = $"{key?.GetType().Name}:{key}";
-            using (var sha2 = System.Security.Cryptography.SHA256.Create())
-            {
-                var bytes2 = System.Text.Encoding.UTF8.GetBytes(repr);
-                var hash2 = sha2.ComputeHash(bytes2);
-                return BitConverter.ToString(hash2);
+                return HashCode.Combine(key);
             }
         }
         catch
