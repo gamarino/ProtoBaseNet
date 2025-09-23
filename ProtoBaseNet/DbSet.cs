@@ -125,18 +125,20 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     {
         if (Has(key)) return this;
         
+        var newIndexes = ObjectAddToIndexes(key);
+        
         if (key is Atom && (key as Atom).Transaction == null)
         {
             if (_temporaryContent.Contains(key))
                 return this;
             var newTemporaryContent = _temporaryContent;
             newTemporaryContent.Add(key);
-            return new DbSet<T>(Content, newTemporaryContent, Indexes, StableId, Transaction);
+            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction);
         }
 
         var h = StableHash(key);
         var newContent = Content.SetAt(h, key);
-        return new DbSet<T>(newContent, _temporaryContent, Indexes, StableId, Transaction);
+        return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction);
     }
 
     /// <summary>
@@ -148,13 +150,16 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     {
         var h = StableHash(key!);
         if (!Has(key)) return this;
+        
+        var newIndexes = ObjectRemoveFromIndexes(key);
+        
         if (key is Atom && (key as Atom).Transaction == null)
         {
             if (!_temporaryContent.Contains(key))
                 return this;
             var newTemporaryContent = _temporaryContent;
             newTemporaryContent.Remove(key);
-            return new DbSet<T>(Content, newTemporaryContent, Indexes, StableId, Transaction);
+            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction);
         }
 
         var newContent = Content;
@@ -162,7 +167,6 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         if (newContent.Has(h))
         {
             newContent = newContent.RemoveAt(h);
-            var newIndexes = ObjectRemoveFromIndexes(key);
             return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction);
         }
         else
@@ -177,7 +181,12 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         if (AtomPointer == null)
         {
             foreach (var item in _temporaryContent)
+            {
+                if (item is Atom valueAtom)
+                    valueAtom.Save();
                 Content = Content.SetAt(StableHash(item), item);
+            }
+
             _temporaryContent.Clear();
             
             Content.Save();
