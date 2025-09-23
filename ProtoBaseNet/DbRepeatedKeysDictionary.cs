@@ -14,7 +14,7 @@ using System.Linq;
 public class DbRepeatedKeysDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>> where T : notnull
 {
     // The persistent dictionary of string keys to CountedSet buckets.
-    internal DbDictionary<DbSet<T>> Values { get; set; }
+    internal readonly DbDictionary<DbSet<T>> Values;
 
     // The transient operation log for handling concurrent updates. Not persisted.
     private readonly List<(string op, string key, T? value)> _opLog;
