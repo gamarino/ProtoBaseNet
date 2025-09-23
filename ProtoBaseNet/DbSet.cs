@@ -1,6 +1,9 @@
+using System.Transactions;
+
 namespace ProtoBaseNet;
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,16 +18,14 @@ using System.Text;
 /// - Two-phase storage: New elements are staged and promoted to persisted content on <see cref="Save"/>.
 /// - Stable hashing: Membership is determined by a deterministic hash, ensuring consistent identity.
 /// </remarks>
-public class DbSet<T> : DbCollection
+public class DbSet<T> : DbCollection, IEnumerable<T>
 {
-    private DbDictionary<T> _content = new();
-    private DbDictionary<T> _newObjects = new();
-    private DbDictionary<object>? _indexes = new();
+    private DbHashDictionary<T> Content = new();
 
     /// <summary>
     /// Gets the total number of elements in the set, including staged and persisted elements.
     /// </summary>
-    public int Count => (_content?.Count ?? 0) + (_newObjects?.Count ?? 0);
+    public int Count => (Content?.Count ?? 0);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DbSet{T}"/> class.
@@ -33,22 +34,20 @@ public class DbSet<T> : DbCollection
 
     public DbSet(IEnumerable<T> items)
     {
-        _content = new DbDictionary<T>();
-        _newObjects = new DbDictionary<T>();
-        _indexes = new DbDictionary<object>();
-
+        var newSet = new DbSet<T>();
         foreach (var item in items)
-        {
-            var h = StableHash(item!);
-            _newObjects = _newObjects.SetAt(h, item);
-        }
+            newSet = newSet.Add(item);
+        
+        Content = newSet.Content;
     }
 
-    private DbSet(DbDictionary<T> content, DbDictionary<T> newObjects, DbDictionary<object>? indexes)
+    private DbSet(
+        DbHashDictionary<T> content, 
+        DbDictionary<Index>? indexes,
+        Guid stableId,
+        ObjectTransaction? transaction) : base(stableId, indexes, transaction)
     {
-        _content = content;
-        _newObjects = newObjects;
-        _indexes = indexes;
+        Content = content;
     }
 
     private static int StableHash(object? key)
@@ -99,7 +98,7 @@ public class DbSet<T> : DbCollection
     public bool Has(T key)
     {
         var h = StableHash(key!);
-        return _newObjects.Has(h) || _content.Has(h);
+        return Content.Has(h);
     }
 
     /// <summary>
@@ -112,9 +111,8 @@ public class DbSet<T> : DbCollection
         if (Has(key)) return this;
 
         var h = StableHash(key!);
-        var newNew = new DbDictionary<T>().ExtendFrom(_newObjects).SetAt(h, key);
-        var newIndexes = _indexes; // Hook for index updates on first appearance
-        return new DbSet<T>(_content, newNew, newIndexes);
+        var newContent = Content.SetAt(h, key);
+        return new DbSet<T>(newContent, Indexes, StableId, Transaction);
     }
 
     /// <summary>
@@ -127,20 +125,16 @@ public class DbSet<T> : DbCollection
         var h = StableHash(key!);
         if (!Has(key)) return this;
 
-        var newNew = _newObjects;
-        var newCont = _content;
+        var newContent = Content;
 
-        if (_newObjects.Has(h))
+        if (newContent.Has(h))
         {
-            newNew = _newObjects.RemoveAt(h);
+            newContent = newContent.RemoveAt(h);
+            var newIndexes = ObjectRemoveFromIndexes(key);
+            return new DbSet<T>(newContent, newIndexes, StableId, Transaction);
         }
         else
-        {
-            newCont = _content.RemoveAt(h);
-        }
-
-        var newIndexes = _indexes; // Hook for index updates on last removal
-        return new DbSet<T>(newCont, newNew, newIndexes);
+            return this;
     }
 
     /// <summary>
@@ -148,23 +142,9 @@ public class DbSet<T> : DbCollection
     /// </summary>
     internal override void Save()
     {
-        foreach (var (k, v) in _newObjects.AsIterable())
-        {
-            _content = _content.SetAt(k, v);
-        }
-        _newObjects = new DbDictionary<T>();
-    }
-
-    /// <summary>
-    /// Returns an enumerable that iterates through the elements in the set.
-    /// </summary>
-    /// <returns>An <see cref="IEnumerable{T}"/> for the set.</returns>
-    public IEnumerable<T> AsIterable()
-    {
-        foreach (var (_, v) in _newObjects.AsIterable())
-            yield return v;
-        foreach (var (_, v) in _content.AsIterable())
-            yield return v;
+        Content.Save();
+        Indexes?.Save();
+        base.Save();
     }
 
     /// <summary>
@@ -175,7 +155,7 @@ public class DbSet<T> : DbCollection
     public DbSet<T> Union(DbSet<T> other)
     {
         var result = this;
-        foreach (var item in other.AsIterable())
+        foreach (var item in other)
             result = result.Add(item);
         return result;
     }
@@ -188,7 +168,7 @@ public class DbSet<T> : DbCollection
     public DbSet<T> Intersection(DbSet<T> other)
     {
         var result = new DbSet<T>();
-        foreach (var item in AsIterable())
+        foreach (var item in other)
         {
             if (other.Has(item))
                 result = result.Add(item);
@@ -204,40 +184,19 @@ public class DbSet<T> : DbCollection
     public DbSet<T> Difference(DbSet<T> other)
     {
         var result = new DbSet<T>();
-        foreach (var item in AsIterable())
+        foreach (var item in other)
         {
             if (!other.Has(item))
                 result = result.Add(item);
         }
         return result;
     }
-}
-
-file static class DbDictionaryExtensions
-{
-    public static DbDictionary<T> ExtendFrom<T>(this DbDictionary<T> target, DbDictionary<T> source)
+    
+    public IEnumerator<T> GetEnumerator()
     {
-        foreach (var (k, v) in source.AsIterable())
-            target = target.SetAt(k, v);
-        return target;
+        return Content.GetEnumerator();
     }
 
-    public static IEnumerable<(int key, T value)> AsIterable<T>(this DbDictionary<T> dict)
-    {
-        foreach (var kv in dict)
-        {
-            var keyObj = kv.Key;
-            int key = keyObj is int i ? i : (keyObj is IConvertible ? Convert.ToInt32(keyObj) : keyObj.GetHashCode());
-            yield return (key, kv.Value);
-        }
-    }
-
-    public static bool Has<T>(this DbDictionary<T> dict, int key)
-        => dict.GetAt(key) is not null;
-
-    public static DbDictionary<T> RemoveAt<T>(this DbDictionary<T> dict, int key)
-        => dict.RemoveAt(key);
-
-    public static DbDictionary<T> SetAt<T>(this DbDictionary<T> dict, int key, T value)
-        => dict.SetAt(key, value);
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
+

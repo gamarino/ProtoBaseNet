@@ -13,7 +13,7 @@ using System.Collections.Generic;
 /// - <see cref="RemoveRecordAt"/> removes a single occurrence of a value.
 /// - <see cref="RemoveAt"/> removes the entire key and all its values.
 /// </remarks>
-public class DbRepeatedKeysDictionary<T> : DbCollection
+public class DbRepeatedKeysDictionary<T> : DbCollection where T : notnull
 {
     /// <summary>
     /// Represents a bucket that acts as a multiset for values associated with a single key.
@@ -83,7 +83,7 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
         public bool IsEmpty() => _counts.Count == 0;
     }
 
-    private readonly DbDictionary<CountedSet> _dict = new();
+    private readonly DbDictionary<CountedSet> Values = new();
     private readonly List<(string op, string key, T? value)> _opLog = new();
 
     /// <summary>
@@ -93,7 +93,7 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
     /// <returns>A <see cref="CountedSet"/> containing the values for the key. Returns an empty set if the key is not found.</returns>
     public CountedSet GetAt(string key)
     {
-        var bucket = _dict.GetAt(key);
+        var bucket = Values.GetAt(key);
         return bucket ?? new CountedSet();
     }
 
@@ -105,10 +105,10 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
     /// <returns>A new dictionary with the value added.</returns>
     public DbRepeatedKeysDictionary<T> SetAt(string key, T value)
     {
-        var bucket = _dict.Has(key) ? (_dict.GetAt(key) ?? new CountedSet()) : new CountedSet();
+        var bucket = Values.Has(key) ? (Values.GetAt(key) ?? new CountedSet()) : new CountedSet();
         var previouslyPresent = bucket.Has(value);
         bucket.Add(value);
-        _dict.SetAt(key, bucket);
+        Values.SetAt(key, bucket);
         _opLog.Add(("set", key, value));
 
         return this;
@@ -121,9 +121,9 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
     /// <returns>A new dictionary with the key removed.</returns>
     public DbRepeatedKeysDictionary<T> RemoveAt(string key)
     {
-        if (_dict.Has(key))
+        if (Values.Has(key))
         {
-            _dict.RemoveAt(key);
+            Values.RemoveAt(key);
             _opLog.Add(("remove", key, default));
         }
         return this;
@@ -137,19 +137,19 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
     /// <returns>A new dictionary with the value removed.</returns>
     public DbRepeatedKeysDictionary<T> RemoveRecordAt(string key, T record)
     {
-        if (_dict.Has(key))
+        if (Values.Has(key))
         {
-            var bucket = _dict.GetAt(key);
+            var bucket = Values.GetAt(key);
             if (bucket is not null && bucket.Has(record))
             {
                 bucket.Remove(record);
                 if (bucket.IsEmpty())
                 {
-                    _dict.RemoveAt(key);
+                    Values.RemoveAt(key);
                 }
                 else
                 {
-                    _dict.SetAt(key, bucket);
+                    Values.SetAt(key, bucket);
                 }
                 _opLog.Add(("remove_record", key, record));
             }
@@ -162,7 +162,7 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
     /// </summary>
     /// <param name="key">The key to locate.</param>
     /// <returns>True if the dictionary contains the key; otherwise, false.</returns>
-    public bool Has(string key) => _dict.Has(key);
+    public bool Has(string key) => Values.Has(key);
 
     /// <summary>
     /// Returns an enumerable that iterates through all key-value pairs, repeating values according to their counts.
@@ -170,7 +170,7 @@ public class DbRepeatedKeysDictionary<T> : DbCollection
     /// <returns>An enumerable of key-value pairs.</returns>
     public IEnumerable<(string key, T value)> AsIterable()
     {
-        foreach (var kv in _dict)
+        foreach (var kv in Values)
         {
             var key = kv.Key as string ?? kv.Key?.ToString() ?? string.Empty;
             foreach (var v in kv.Value.AsIterable())

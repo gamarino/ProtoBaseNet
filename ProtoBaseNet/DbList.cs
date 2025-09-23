@@ -2,6 +2,7 @@ namespace ProtoBaseNet;
 
 using System;
 using System.Collections.Generic;
+using System.Collections;
 
 /// <summary>
 /// An immutable, persistent list implemented as a balanced binary tree (AVL-like).
@@ -14,7 +15,7 @@ using System.Collections.Generic;
 /// - Balanced tree: rotations keep height logarithmic, enabling O(log N) positional
 ///   access (<see cref="GetAt"/>, <see cref="SetAt"/>, <see cref="InsertAt"/>, <see cref="RemoveAt"/>) and O(N) in-order iteration.
 /// </remarks>
-public class DbList<T> : DbCollection
+public class DbList<T> : DbCollection, IEnumerable<T>
 {
     /// <summary>
     /// Gets a value indicating whether the list is empty.
@@ -55,6 +56,24 @@ public class DbList<T> : DbCollection
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DbList{T}"/> class.
+    /// This constructor is used to create nodes initially loaded with a List values.
+    /// </summary>
+    public DbList(List<T> initialValues)
+    {
+        // DbList from List
+        var newList = new DbList<T>();
+        foreach (var v in initialValues)
+            newList = newList.InsertAt(0, v);
+        Value = newList.Value;
+        Empty = newList.Empty;
+        Next = newList.Next;
+        Previous = newList.Previous;
+        Height = newList.Height;
+        Count = newList.Count;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DbList{T}"/> class.
     /// This constructor is used to create nodes in the tree.
     /// </summary>
     public DbList(
@@ -62,7 +81,9 @@ public class DbList<T> : DbCollection
         bool empty = true,
         DbList<T>? next = null,
         DbList<T>? previous = null,
-        DbDictionary<object>? indexes = null)
+        Guid? stableId = null,
+        DbDictionary<object>? indexes = null,
+        ObjectTransaction? transaction = null) : base(stableId: stableId, transaction: transaction)
     {
         if (previous is { Empty: true }) previous = null;
         if (next is { Empty: true }) next = null;
@@ -112,10 +133,8 @@ public class DbList<T> : DbCollection
         return new DbList<T>(
             value: value,
             empty: empty,
-            previous: previous,
             next: next,
-            indexes: indexes ?? _indexes
-        );
+            previous: previous, indexes: indexes ?? _indexes);
     }
 
     /// <summary>
@@ -194,18 +213,14 @@ public class DbList<T> : DbCollection
         var newRight = new DbList<T>(
             value: Value,
             empty: false,
-            previous: Previous.Next,
             next: Next,
-            indexes: _indexes
-        );
+            previous: Previous.Next, indexes: _indexes);
 
         return new DbList<T>(
             value: Previous.Value,
             empty: false,
-            previous: Previous.Previous,
             next: newRight,
-            indexes: _indexes
-        );
+            previous: Previous.Previous, indexes: _indexes);
     }
 
     private DbList<T> LeftRotation()
@@ -215,18 +230,14 @@ public class DbList<T> : DbCollection
         var newLeft = new DbList<T>(
             value: Value,
             empty: false,
-            previous: Previous,
             next: Next.Previous,
-            indexes: _indexes
-        );
+            previous: Previous, indexes: _indexes);
 
         return new DbList<T>(
             value: Next.Value,
             empty: false,
-            previous: newLeft,
             next: Next.Next,
-            indexes: _indexes
-        );
+            previous: newLeft, indexes: _indexes);
     }
 
     private DbList<T> Rebalance()
@@ -238,10 +249,8 @@ public class DbList<T> : DbCollection
             node = new DbList<T>(
                 value: node.Value,
                 empty: false,
-                previous: node.Previous.Rebalance(),
                 next: node.Next,
-                indexes: _indexes
-            );
+                previous: node.Previous.Rebalance(), indexes: _indexes);
         }
 
         while (node.Next is not null && !(node.Next.BalanceFactor() is >= -1 and <= 1))
@@ -249,10 +258,8 @@ public class DbList<T> : DbCollection
             node = new DbList<T>(
                 value: node.Value,
                 empty: false,
-                previous: node.Previous,
                 next: node.Next.Rebalance(),
-                indexes: _indexes
-            );
+                previous: node.Previous, indexes: _indexes);
         }
 
         var balance = node.BalanceFactor();
@@ -264,10 +271,8 @@ public class DbList<T> : DbCollection
                 node = new DbList<T>(
                     value: node.Value,
                     empty: false,
-                    previous: node.Previous.LeftRotation(),
                     next: node.Next,
-                    indexes: _indexes
-                );
+                    previous: node.Previous.LeftRotation(), indexes: _indexes);
             }
 
             return node.RightRotation();
@@ -280,10 +285,8 @@ public class DbList<T> : DbCollection
                 node = new DbList<T>(
                     value: node.Value,
                     empty: false,
-                    previous: node.Previous,
                     next: node.Next.RightRotation(),
-                    indexes: _indexes
-                );
+                    previous: node.Previous, indexes: _indexes);
             }
 
             return node.LeftRotation();
@@ -324,20 +327,16 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous,
                     next: Next.SetAt(offset - leftCount - 1, value),
-                    indexes: _indexes
-                );
+                    previous: Previous, indexes: _indexes);
             }
             else
             {
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous,
                     next: new DbList<T>(value: value, empty: false, indexes: _indexes),
-                    indexes: _indexes
-                );
+                    previous: Previous, indexes: _indexes);
             }
         }
         else if (cmp < 0)
@@ -347,20 +346,16 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous.SetAt(offset, value),
                     next: Next,
-                    indexes: _indexes
-                );
+                    previous: Previous.SetAt(offset, value), indexes: _indexes);
             }
             else
             {
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: new DbList<T>(value: value, empty: false, indexes: _indexes),
                     next: Next,
-                    indexes: _indexes
-                );
+                    previous: new DbList<T>(value: value, empty: false, indexes: _indexes), indexes: _indexes);
             }
         }
         else
@@ -368,10 +363,8 @@ public class DbList<T> : DbCollection
             newNode = new DbList<T>(
                 value: value,
                 empty: false,
-                previous: Previous,
                 next: Next,
-                indexes: _indexes
-            );
+                previous: Previous, indexes: _indexes);
         }
 
         var result = newNode.Rebalance();
@@ -381,10 +374,8 @@ public class DbList<T> : DbCollection
         return new DbList<T>(
             value: result.Value,
             empty: result.Empty,
-            previous: result.Previous,
             next: result.Next,
-            indexes: newIndexes
-        );
+            previous: result.Previous, indexes: newIndexes);
     }
 
     /// <summary>
@@ -413,20 +404,16 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous,
                     next: Next.InsertAt(cmp - 1, value),
-                    indexes: _indexes
-                );
+                    previous: Previous, indexes: _indexes);
             }
             else
             {
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous,
                     next: new DbList<T>(value: value, empty: false, indexes: _indexes),
-                    indexes: _indexes
-                );
+                    previous: Previous, indexes: _indexes);
             }
         }
         else if (cmp < 0)
@@ -436,20 +423,16 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous.InsertAt(offset, value),
                     next: Next,
-                    indexes: _indexes
-                );
+                    previous: Previous.InsertAt(offset, value), indexes: _indexes);
             }
             else
             {
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: new DbList<T>(value: value, empty: false, indexes: _indexes),
                     next: Next,
-                    indexes: _indexes
-                );
+                    previous: new DbList<T>(value: value, empty: false, indexes: _indexes), indexes: _indexes);
             }
         }
         else
@@ -457,10 +440,8 @@ public class DbList<T> : DbCollection
             newNode = new DbList<T>(
                 value: value,
                 empty: false,
-                previous: Previous,
-                next: new DbList<T>(value: Value, empty: false, previous: null, next: Next, indexes: _indexes),
-                indexes: _indexes
-            );
+                next: new DbList<T>(value: Value, empty: false, next: Next, previous: null, indexes: _indexes),
+                previous: Previous, indexes: _indexes);
         }
 
         var result = newNode.Rebalance();
@@ -469,10 +450,8 @@ public class DbList<T> : DbCollection
         return new DbList<T>(
             value: result.Value,
             empty: result.Empty,
-            previous: result.Previous,
             next: result.Next,
-            indexes: newIndexes
-        );
+            previous: result.Previous, indexes: newIndexes);
     }
 
     /// <summary>
@@ -502,10 +481,8 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: Previous,
                     next: newNext,
-                    indexes: _indexes
-                );
+                    previous: Previous, indexes: _indexes);
             }
             else
             {
@@ -520,10 +497,8 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: Value,
                     empty: false,
-                    previous: prevRemoved.Empty ? null : prevRemoved,
                     next: Next,
-                    indexes: _indexes
-                );
+                    previous: prevRemoved.Empty ? null : prevRemoved, indexes: _indexes);
             }
             else
             {
@@ -539,10 +514,8 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: firstValue,
                     empty: false,
-                    previous: (Previous is not null && !Previous.Empty) ? Previous : null,
                     next: newNext.Empty ? null : newNext,
-                    indexes: _indexes
-                );
+                    previous: (Previous is not null && !Previous.Empty) ? Previous : null, indexes: _indexes);
             }
             else if (Previous is not null && !Previous.Empty)
             {
@@ -551,10 +524,8 @@ public class DbList<T> : DbCollection
                 newNode = new DbList<T>(
                     value: lastValue,
                     empty: false,
-                    previous: newPrev.Empty ? null : newPrev,
                     next: null,
-                    indexes: _indexes
-                );
+                    previous: newPrev.Empty ? null : newPrev, indexes: _indexes);
             }
             else
             {
@@ -568,10 +539,8 @@ public class DbList<T> : DbCollection
         return new DbList<T>(
             value: result.Value,
             empty: result.Empty,
-            previous: result.Previous,
             next: result.Next,
-            indexes: newIndexes
-        );
+            previous: result.Previous, indexes: newIndexes);
     }
 
     /// <summary>
@@ -590,19 +559,15 @@ public class DbList<T> : DbCollection
             var newNode = new DbList<T>(
                 value: Value,
                 empty: false,
-                previous: prevRemoved.Empty ? null : prevRemoved,
                 next: Next,
-                indexes: _indexes
-            );
+                previous: prevRemoved.Empty ? null : prevRemoved, indexes: _indexes);
             var result = newNode.Rebalance();
             var newIndexes = _indexes; // Placeholder
             return new DbList<T>(
                 value: result.Value,
                 empty: result.Empty,
-                previous: result.Previous,
                 next: result.Next,
-                indexes: newIndexes
-            );
+                previous: result.Previous, indexes: newIndexes);
         }
         else
         {
@@ -626,19 +591,15 @@ public class DbList<T> : DbCollection
             var newNode = new DbList<T>(
                 value: Value,
                 empty: false,
-                previous: Previous,
                 next: nextRemoved.Empty ? null : nextRemoved,
-                indexes: _indexes
-            );
+                previous: Previous, indexes: _indexes);
             var result = newNode.Rebalance();
             var newIndexes = _indexes; // Placeholder
             return new DbList<T>(
                 value: result.Value,
                 empty: result.Empty,
-                previous: result.Previous,
                 next: result.Next,
-                indexes: newIndexes
-            );
+                previous: result.Previous, indexes: newIndexes);
         }
         else
         {
@@ -704,10 +665,8 @@ public class DbList<T> : DbCollection
             node = new DbList<T>(
                 value: node.Value,
                 empty: false,
-                previous: node.Previous,
                 next: nextNode.Empty ? null : nextNode,
-                indexes: _indexes
-            );
+                previous: node.Previous, indexes: _indexes);
         }
         else if (cmp < 0 && node.Previous is not null)
         {
@@ -744,10 +703,8 @@ public class DbList<T> : DbCollection
             node = new DbList<T>(
                 value: node.Value,
                 empty: false,
-                previous: null,
                 next: node.Next,
-                indexes: _indexes
-            );
+                previous: null, indexes: _indexes);
         }
         else if (cmp > 0 && node.Next is not null)
         {
@@ -759,10 +716,8 @@ public class DbList<T> : DbCollection
             node = new DbList<T>(
                 value: node.Value,
                 empty: false,
-                previous: prevNode.Empty ? null : prevNode,
                 next: node.Next,
-                indexes: _indexes
-            );
+                previous: prevNode.Empty ? null : prevNode, indexes: _indexes);
         }
         else
         {
@@ -793,10 +748,8 @@ public class DbList<T> : DbCollection
             return new DbList<T>(
                 value: default,
                 empty: true,
-                previous: null,
                 next: null,
-                indexes: _indexes
-            );
+                previous: null, indexes: _indexes);
         }
 
         return Tail(fromOffset).Head(toOffset - fromOffset);
@@ -804,5 +757,21 @@ public class DbList<T> : DbCollection
 
     private DbDictionary<object>? Add2Indexes(T? value) => _indexes;
     private DbDictionary<object>? RemoveFromIndexes(T? value) => _indexes;
-    
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        if (Empty) yield break;
+        if (Previous is not null) 
+            foreach (var it in Previous)
+                yield return it;
+        yield return Value;
+        if (Next is not null) 
+            foreach (var it in Next)
+                yield return it;
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 }

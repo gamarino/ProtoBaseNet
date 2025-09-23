@@ -1,6 +1,7 @@
 namespace ProtoBaseNet;
 
 using System;
+using System.Collections;
 using System.Collections.Generic;
 
 /// <summary>
@@ -13,7 +14,7 @@ using System.Collections.Generic;
 /// - Balanced height: Rotations keep operations O(log N) for lookup, insert, and remove.
 /// - In-order traversal via <see cref="AsIterable"/> yields entries sorted by integer key.
 /// </remarks>
-public class DbHashDictionary<T> : DbCollection
+public class DbHashDictionary<T> : DbCollection, IEnumerable<T>
 {
     /// <summary>
     /// Gets the key of the node. Null for an empty/sentinel node.
@@ -463,5 +464,26 @@ public class DbHashDictionary<T> : DbCollection
             node = node.Next;
         }
         throw new ProtoCorruptionException("get_last traversal inconsistency");
+    }
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        if (Key is null) yield break;
+        
+        if (Previous is not null)
+            foreach (var item in Previous)
+                yield return item;
+
+        if (Key is not null)
+            yield return Value;
+
+        if (Next is not null)
+            foreach (var item in Next)
+                yield return item;
+    }
+
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
     }
 }

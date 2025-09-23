@@ -15,34 +15,34 @@ using System.Collections.Generic;
 /// </remarks>
 public class DbCountedSet<T> : DbCollection
 {
-    private readonly DbDictionary<T> _items;
-    private readonly DbDictionary<int> _counts;
+    private readonly DbDictionary<T> Values;
+    private readonly DbDictionary<int> Counters;
 
-    public int UniqueCount => _items.Count;
+    public int UniqueCount => Values.Count;
 
     public DbCountedSet()
     {
-        _items = new DbDictionary<T>();
-        _counts = new DbDictionary<int>();
+        Values = new DbDictionary<T>();
+        Counters = new DbDictionary<int>();
     }
 
     public DbCountedSet(
-        DbDictionary<T> items,
-        DbDictionary<int> counts,
+        DbDictionary<T> values,
+        DbDictionary<int> counters,
         Guid? collectionId = null,
         ObjectTransaction? transaction = null,
         AtomPointer? atomPointer = null,
         DbDictionary<Index>? indexes = null)
         : base(collectionId, indexes, transaction, atomPointer)
     {
-        _items = items;
-        _counts = counts;
+        Values = values;
+        Counters = counters;
         Indexes = indexes;
     }
 
     public IEnumerable<T> AsIterable()
     {
-        foreach (var (_, value) in _items.AsIterable())
+        foreach (var (_, value) in Values.AsIterable())
             yield return value;
     }
 
@@ -51,13 +51,13 @@ public class DbCountedSet<T> : DbCollection
     public bool Has(T key)
     {
         var h = HashOf(key);
-        return _counts.Has(h);
+        return Counters.Has(h);
     }
 
     public int GetCount(T key)
     {
         var h = HashOf(key);
-        if (_counts.TryGetValue(h, out var count)) return count;
+        if (Counters.TryGetValue(h, out var count)) return count;
         return 0;
     }
 
@@ -66,7 +66,7 @@ public class DbCountedSet<T> : DbCollection
         get
         {
             var total = 0;
-            foreach (var (_, cnt) in _counts.AsIterable())
+            foreach (var (_, cnt) in Counters.AsIterable())
             {
                 try { total += Convert.ToInt32(cnt); } catch { /* ignore */ }
             }
@@ -78,8 +78,8 @@ public class DbCountedSet<T> : DbCollection
     {
         var h = HashOf(key);
         var currentCount = GetCount(key);
-        var newItems = _items.SetAt(h, key);
-        var newCounts = _counts.SetAt(h, currentCount + 1);
+        var newItems = Values.SetAt(h, key);
+        var newCounts = Counters.SetAt(h, currentCount + 1);
         return new DbCountedSet<T>(newItems, newCounts, StableId, Transaction, AtomPointer, Indexes);
     }
 
@@ -89,8 +89,8 @@ public class DbCountedSet<T> : DbCollection
         var currentCount = GetCount(key);
         if (currentCount == 0) return this;
 
-        var newItems = _items;
-        var newCounts = _counts;
+        var newItems = Values;
+        var newCounts = Counters;
 
         if (currentCount == 1)
         {

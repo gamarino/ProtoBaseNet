@@ -12,7 +12,7 @@ namespace ProtoBaseNet
         /// </summary>
         /// <param name="item">The item to add to the index.</param>
         /// <remarks>Implementations must be idempotent or handle duplicates according to their semantics.</remarks>
-        public void Add2Index(object? item)
+        public Index Add2Index(object? item)
         {
             throw new NotImplementedException();    
         }
@@ -22,7 +22,7 @@ namespace ProtoBaseNet
         /// </summary>
         /// <param name="item">The item to remove from the index.</param>
         /// <remarks>Should not throw if the item is not present (no-op removal preferred).</remarks>
-        public void RemoveFromIndex(object? item)
+        public Index RemoveFromIndex(object? item)
         {
             throw new NotImplementedException();
         }
@@ -68,14 +68,60 @@ namespace ProtoBaseNet
         /// <param name="attributeName">The name of the attribute to index.</param>
         /// <param name="newIndex">The index to add.</param>
         /// <returns>A new collection with the index added.</returns>
-        public virtual DbCollection IndexAdd(string attributeName, Index newIndex) => this;
+        public virtual DbDictionary<Index> IndexAdd(string attributeName, Index newIndex)
+        {
+            var newIndexes = Indexes ?? new DbDictionary<Index>();
+            newIndexes = newIndexes.SetAt(attributeName, newIndex);
+            return newIndexes;
+        }
 
         /// <summary>
         /// Removes an index for a given attribute.
         /// </summary>
         /// <param name="attributeName">The name of the attribute whose index should be removed.</param>
         /// <returns>A new collection with the index removed.</returns>
-        public virtual DbCollection IndexRemove(string attributeName) => this;
+        public virtual DbDictionary<Index> IndexRemove(string attributeName)
+        {
+            var newIndexes = Indexes ?? new DbDictionary<Index>();
+            newIndexes = newIndexes.RemoveAt(attributeName);
+            return newIndexes;
+        }
+
+        /// <summary>
+        /// Adds an object to indexes.
+        /// </summary>
+        /// <returns>A new index collection with the object added to indexes.</returns>
+        public virtual DbDictionary<Index> ObjectAddToIndexes(object item)
+        {
+            var newIndexes = Indexes;
+            if (Indexes != null)
+            {
+                foreach (var indexTuple in Indexes)
+                {
+                    var (attributeName, index) = indexTuple;
+                    newIndexes = newIndexes.SetAt(attributeName, index.Add2Index(item));   
+                }
+            }
+            return newIndexes;
+        }
+
+        /// <summary>
+        /// Removes an object from indexes.
+        /// </summary>
+        /// <returns>A new index collection with the objects removed from indexes.</returns>
+        public virtual DbDictionary<Index> ObjectRemoveFromIndexes(object item)
+        {
+            var newIndexes = Indexes;
+            if (Indexes != null)
+            {
+                foreach (var indexTuple in Indexes)
+                {
+                    var (attributeName, index) = indexTuple;
+                    newIndexes = newIndexes.SetAt(attributeName, index.RemoveFromIndex(item));   
+                }
+            }
+            return newIndexes;
+        }
 
         /// <summary>
         /// A hook for performing a concurrent update. Given a previous snapshot, returns a reconciled collection.
