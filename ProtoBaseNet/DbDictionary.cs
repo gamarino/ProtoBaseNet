@@ -44,12 +44,12 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
             var item = Content.GetAt(center);
             int cmp = key.CompareTo(item.Key);
             
-            if (cmp > 0)
+            if (cmp < 0)
             {
                 right = center - 1;
                 continue;
             }
-            if (cmp < 0)
+            if (cmp > 0)
             {
                 left = center + 1;
                 continue;
@@ -83,12 +83,12 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
             var item = Content.GetAt(center);
             int cmp = key.CompareTo(item.Key);
             
-            if (cmp > 0)
+            if (cmp < 0)
             {
                 right = center - 1;
                 continue;
             }
-            if (cmp < 0)
+            if (cmp > 0)
             {
                 left = center + 1;
                 continue;
@@ -115,12 +115,12 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
             var item = Content.GetAt(center);
             int cmp = key.CompareTo(item.Key);
             
-            if (cmp > 0)
+            if (cmp < 0)
             {
                 right = center - 1;
                 continue;
             }
-            if (cmp < 0)
+            if (cmp > 0)
             {
                 left = center + 1;
                 continue;
@@ -143,12 +143,12 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
             var item = Content.GetAt(center);
             int cmp = key.CompareTo(item.Key);
             
-            if (cmp > 0)
+            if (cmp < 0)
             {
                 right = center - 1;
                 continue;
             }
-            if (cmp < 0)
+            if (cmp > 0)
             {
                 left = center + 1;
                 continue;
@@ -177,9 +177,19 @@ public class DbDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>
             yield return new KeyValuePair<string, T>(item.Key, item.Value);
     }
     
-    IEnumerator IEnumerable.GetEnumerator()
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator()
     {
         return GetEnumerator();
+    }
+
+}
+
+public static class KeyValuePairExtensions
+{
+    public static void Deconstruct<TKey, TValue>(this KeyValuePair<TKey, TValue> kvp, out TKey key, out TValue value)
+    {
+        key = kvp.Key;
+        value = kvp.Value;
     }
 }
 
