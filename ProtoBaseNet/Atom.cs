@@ -126,7 +126,7 @@ namespace ProtoBaseNet
 
         protected virtual Dictionary<string, object> GetDynamicAttributes() => new Dictionary<string, object>();
         
-        internal virtual void Load()
+        public virtual void Load()
         {
             if (_loaded) return;
 
@@ -323,7 +323,7 @@ namespace ProtoBaseNet
             return jsonValue;
         }
 
-        internal virtual void Save()
+        public virtual void Save()
         {
             Load();
             if (AtomPointer != null) return;

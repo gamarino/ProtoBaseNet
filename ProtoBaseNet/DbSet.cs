@@ -176,7 +176,7 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// <summary>
     /// Promotes staged elements to the persisted content.
     /// </summary>
-    internal override void Save()
+    public override void Save()
     {
         if (AtomPointer == null)
         {
