@@ -3,12 +3,16 @@ namespace ProtoBaseNet;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 
 /// <summary>
 /// An immutable dictionary-like collection that allows multiple, repeated values for a single key.
 /// All mutation methods return a new instance of the dictionary.
 /// No indexes are maintained
+/// Even the collection is inmutable on storage, during a transaction a transient log is maintained
+/// in order to recreate operations in the case another transaction changes the base root for this collection
+/// At commit time, if a collision is detected, all operations are replayed
 /// </summary>
 /// <typeparam name="T">The type of values in the dictionary. Must be a non-nullable type.</typeparam>
 public class DbRepeatedKeysDictionary<T> : DbCollection, IEnumerable<KeyValuePair<string, T>> where T : notnull
@@ -17,18 +21,18 @@ public class DbRepeatedKeysDictionary<T> : DbCollection, IEnumerable<KeyValuePai
     internal readonly DbDictionary<DbSet<T>> Values;
 
     // The transient operation log for handling concurrent updates. Not persisted.
-    private readonly List<(string op, string key, T? value)> _opLog;
+    private readonly ImmutableList<(string op, string key, T? value)> _opLog;
 
     public DbRepeatedKeysDictionary(
         DbDictionary<DbSet<T>>? values = null,
-        List<(string op, string key, T? value)>? opLog = null,
+        ImmutableList<(string op, string key, T? value)>? opLog = null,
         Guid? stableId = null,
         DbDictionary<Index>? indexes = null,
         ObjectTransaction? transaction = null, 
         AtomPointer? atomPointer = null) : base(stableId, indexes, transaction, atomPointer)
     {
         Values = values ?? new DbDictionary<DbSet<T>>();
-        _opLog = opLog ?? new List<(string op, string key, T? value)>();
+        _opLog = opLog ?? ImmutableList<(string op, string key, T? value)>.Empty;
     }
 
     public DbSet<T> GetAt(string key)
@@ -56,7 +60,7 @@ public class DbRepeatedKeysDictionary<T> : DbCollection, IEnumerable<KeyValuePai
         else
             newValues = newValues.SetAt(key, new DbSet<T>([value]));
 
-        newOpLog.Add(("set", key, value));
+        newOpLog = newOpLog.Add(("set", key, value));
         return new DbRepeatedKeysDictionary<T>(newValues, newOpLog);
     }
 
