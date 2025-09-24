@@ -106,16 +106,6 @@ public class DbRepeatedKeysDictionary<T> : DbCollection, IEnumerable<KeyValuePai
         return rebased;
     }
 
-    public override void Save()
-    {
-        if (AtomPointer != null) return;
-
-        Values.Save();
-        
-        // Now that all children are persisted, save this object.
-        base.Save();
-    }
-
     public IEnumerator<KeyValuePair<string, T>> GetEnumerator()
     {
         foreach (var item in Values)

@@ -126,9 +126,12 @@ namespace ProtoBaseNet
 
         protected virtual Dictionary<string, object> GetDynamicAttributes() => new Dictionary<string, object>();
         
-        public virtual void Load()
+        public virtual void Load(ObjectTransaction? transaction)
         {
             if (_loaded) return;
+            
+            if (transaction is null)
+                Transaction = transaction;
 
             if (Transaction != null && AtomPointer != null)
             {
@@ -236,7 +239,7 @@ namespace ProtoBaseNet
                                 {
                                     var ap = BuildPointer(valueDict);
                                     var literal = Transaction?.ReadObject(className, ap) as DbLiteral;
-                                    literal?.Load();
+                                    literal?.Load(Transaction);
                                     convertedValue = literal;
                                 }
                                 else
@@ -323,11 +326,13 @@ namespace ProtoBaseNet
             return jsonValue;
         }
 
-        public virtual void Save()
+        public virtual void Save(ObjectTransaction? transaction = null)
         {
-            Load();
+            if (transaction is null)
+                transaction = Transaction;
+            
+            Load(transaction);
             if (AtomPointer != null) return;
-            if (_saved) return;
 
             _saved = true;
             if (Transaction == null) throw new ProtoValidationException("An DBObject can only be saved within a given transaction!");
@@ -351,6 +356,9 @@ namespace ProtoBaseNet
                     var value = field.GetValue(this);
                     if (value == null) continue;
 
+                    if (value is Atom valueAtom)
+                        valueAtom.Save(Transaction);
+                    
                     if (value is string str)
                     {
                         var literalAtom = Transaction.GetLiteral(str);

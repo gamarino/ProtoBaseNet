@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 
 namespace ProtoBaseNet
 {
@@ -83,6 +84,14 @@ namespace ProtoBaseNet
         /// <returns>The attribute value, or null if not present.</returns>
         public virtual object? GetAt(string name)
         {
+            // Se usan BindingFlags para asegurar que se encuentren campos públicos y no públicos.
+            var fieldDefinition = GetType().GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (fieldDefinition != null)
+            {
+                // El método correcto es GetValue(), pasando 'this' como la instancia de la cual leer el valor.
+                return fieldDefinition.GetValue(this);
+            }
+            
             return Attributes.GetAt(name);
         }
 
@@ -144,6 +153,7 @@ namespace ProtoBaseNet
         {
             var mutables = this.Transaction!.GetMutables();
             var currentValue = mutables.GetAt(HashKey);
+
             if (currentValue == null) return null;
             return currentValue.GetAt(name);
         }

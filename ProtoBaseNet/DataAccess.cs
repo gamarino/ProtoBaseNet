@@ -233,7 +233,7 @@ namespace ProtoBaseNet
                 var spaceHistory = new DbList<RootObject>();
                 spaceHistory.Transaction = readTr;
                 spaceHistory.AtomPointer = rootPointer;
-                spaceHistory.Load();
+                spaceHistory.Load(readTr);
                 return spaceHistory;
             }
 
@@ -345,7 +345,7 @@ namespace ProtoBaseNet
             {
                 if (dbCatalog.GetAt(DatabaseName) is DbDictionary<object> dbRoot)
                 {
-                    dbRoot.Load();
+                    dbRoot.Load(readTr);
                     return dbRoot;
                 }
             }
@@ -358,7 +358,7 @@ namespace ProtoBaseNet
             var updateTr = new ObjectTransaction(this);
             var initialRoot = ObjectSpace.GetSpaceRoot();
             initialRoot.Transaction = updateTr;
-            initialRoot.Load();
+            initialRoot.Load(updateTr);
 
             var currentObjectRoot = initialRoot.ObjectRoot as DbDictionary<object> ?? 
                                     new DbDictionary<object>(transaction: updateTr);
@@ -423,7 +423,7 @@ namespace ProtoBaseNet
             var atom = (Atom)Activator.CreateInstance(type)!;
             atom.AtomPointer = ap;
             atom.Transaction = this;
-            atom.Load();
+            atom.Load(this);
             return atom;
         }
 

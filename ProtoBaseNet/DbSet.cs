@@ -176,7 +176,7 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// <summary>
     /// Promotes staged elements to the persisted content.
     /// </summary>
-    public override void Save()
+    public override void Save(ObjectTransaction? transaction = null)
     {
         if (AtomPointer == null)
         {
@@ -189,9 +189,7 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
 
             _temporaryContent.Clear();
             
-            Content.Save();
-            Indexes?.Save();
-            base.Save();
+            base.Save(transaction);
         }
     }
 
