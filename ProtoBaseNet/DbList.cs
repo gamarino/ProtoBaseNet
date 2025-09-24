@@ -737,23 +737,6 @@ public class DbList<T> : DbCollection, IEnumerable<T>
         return Tail(fromOffset).Head(toOffset - fromOffset);
     }
 
-    public void Save()
-    {
-        if (AtomPointer is null)
-        {
-            if (!Empty)
-            {
-                if (Previous is not null)
-                    Previous.Save();
-                if (Next is not null)
-                    Next.Save();
-                if (Value is not null && Value is Atom valueAtom)
-                    valueAtom.Save();
-            }            
-            base.Save();
-        }
-    }
-
     public IEnumerator<T> GetEnumerator()
     {
         if (Empty) yield break;
