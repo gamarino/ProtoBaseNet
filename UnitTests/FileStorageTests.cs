@@ -1,7 +1,9 @@
 
 using NUnit.Framework;
 using ProtoBaseNet;
+using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace MainTests
@@ -38,6 +40,15 @@ namespace MainTests
             var pointer = await _storage.PushBytes(data);
             var retrievedData = await _storage.GetBytes(pointer);
             Assert.That(retrievedData, Is.EqualTo(data));
+        }
+
+        [Test]
+        public async Task WriteAndReadAtom()
+        {
+            var data = new Dictionary<string, object> { { "key", "value" } };
+            var pointer = await _storage.WriteAtom(data);
+            var retrievedData = await _storage.ReadAtom(pointer);
+            Assert.That(((JsonElement)retrievedData["key"]).GetString(), Is.EqualTo("value"));
         }
 
         [Test]

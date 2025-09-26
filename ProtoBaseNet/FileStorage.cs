@@ -1,8 +1,8 @@
-
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace ProtoBaseNet
@@ -19,7 +19,7 @@ namespace ProtoBaseNet
 
         public override async Task<AtomPointer> PushAtom(Atom atom)
         {
-            var json = System.Text.Json.JsonSerializer.Serialize(atom);
+            var json = JsonSerializer.Serialize(atom);
             var bytes = Encoding.UTF8.GetBytes(json);
             return await PushBytes(bytes);
         }
@@ -28,7 +28,7 @@ namespace ProtoBaseNet
         {
             var bytes = await GetBytes(pointer);
             var json = Encoding.UTF8.GetString(bytes);
-            var atom = System.Text.Json.JsonSerializer.Deserialize<Atom>(json);
+            var atom = JsonSerializer.Deserialize<Atom>(json);
             return atom!;
         }
 
@@ -65,6 +65,30 @@ namespace ProtoBaseNet
                     return Convert.FromBase64String(line);
                 }
             }
+        }
+
+        /// <summary>
+        /// Deserializes atom data from JSON format.
+        /// </summary>
+        /// <param name="atomPointer">The pointer to the atom data.</param>
+        /// <returns>The deserialized atom data as a dictionary.</returns>
+        public override async Task<IDictionary<string, object>> ReadAtom(AtomPointer atomPointer)
+        {
+            var bytes = await GetBytes(atomPointer);
+            var json = Encoding.UTF8.GetString(bytes);
+            return JsonSerializer.Deserialize<Dictionary<string, object>>(json)!;
+        }
+
+        /// <summary>
+        /// Serializes atom data to JSON format and persists it.
+        /// </summary>
+        /// <param name="data">The atom data to serialize and persist.</param>
+        /// <returns>A pointer to the persisted atom data.</returns>
+        public override async Task<AtomPointer> WriteAtom(IDictionary<string, object> data)
+        {
+            var json = JsonSerializer.Serialize(data);
+            var bytes = Encoding.UTF8.GetBytes(json);
+            return await PushBytes(bytes);
         }
 
         public override void SetCurrentRoot(AtomPointer pointer)

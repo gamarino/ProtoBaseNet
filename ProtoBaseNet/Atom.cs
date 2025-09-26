@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Text.Json;
 
 namespace ProtoBaseNet
 {
@@ -54,7 +53,7 @@ namespace ProtoBaseNet
     /// It encapsulates:
     /// - A storage pointer (<see cref="AtomPointer"/>)
     /// - An owning transaction (<see cref="ObjectTransaction"/>)
-    /// - A load/save lifecycle with JSON-based serialization
+    /// - A load/save lifecycle with dictionary-based serialization
     /// - Extension points for dynamic attributes and post-load hooks
     /// </remarks>
     public abstract class Atom
@@ -135,47 +134,39 @@ namespace ProtoBaseNet
 
             if (Transaction != null && AtomPointer != null)
             {
-                var bytes = Transaction.Storage.GetBytes(AtomPointer).GetAwaiter().GetResult();
-                if (bytes is { Length: > 0 })
+                var loadedDict = Transaction.Storage.ReadAtom(AtomPointer).GetAwaiter().GetResult();
+                if (loadedDict != null)
                 {
-                    var jsonString = System.Text.Encoding.UTF8.GetString(bytes);
-                    var loadedAtomDict = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonString);
-                    
-                    if (loadedAtomDict != null)
+                    foreach (var kv in loadedDict)
                     {
-                        var loadedDict = JsonToDict(loadedAtomDict);
+                        var attributeName = kv.Key;
+                        var attributeValue = kv.Value;
 
-                        foreach (var kv in loadedDict)
+                        var field = GetType().GetField(attributeName, BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        if (field != null)
                         {
-                            var attributeName = kv.Key;
-                            var attributeValue = kv.Value;
-
-                            var field = GetType().GetField(attributeName, BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (field != null)
+                            try
                             {
-                                try
-                                {
-                                    field.SetValue(this, attributeValue);
-                                }
-                                catch (ArgumentException)
-                                {
-                                    object? convertedValue = TryConvert(attributeValue, field.FieldType);
-                                    field.SetValue(this, convertedValue);
-                                }
-                                catch (MissingFieldException)
-                                {
-                                    SetDynamicAttribute(attributeName, attributeValue);
-                                }
+                                field.SetValue(this, attributeValue);
                             }
-                            else
+                            catch (ArgumentException)
+                            {
+                                object? convertedValue = TryConvert(attributeValue, field.FieldType);
+                                field.SetValue(this, convertedValue);
+                            }
+                            catch (MissingFieldException)
                             {
                                 SetDynamicAttribute(attributeName, attributeValue);
                             }
+                        }
+                        else
+                        {
+                            SetDynamicAttribute(attributeName, attributeValue);
+                        }
 
-                            if (attributeValue is Atom atomValue)
-                            {
-                                atomValue.Transaction = Transaction;
-                            }
+                        if (attributeValue is Atom atomValue)
+                        {
+                            atomValue.Transaction = Transaction;
                         }
                     }
                 }
@@ -205,146 +196,16 @@ namespace ProtoBaseNet
             return false;
         }
 
-        protected virtual Dictionary<string, object> JsonToDict(Dictionary<string, object> jsonData)
+        private Dictionary<string, object> _toDictionary()
         {
-            var data = new Dictionary<string, object>();
-
-            foreach (var entry in jsonData)
-            {
-                var name = entry.Key;
-                var value = entry.Value;
-
-                if (value is JsonElement { ValueKind: JsonValueKind.Object } jsonElement)
-                {
-                    var valueDict = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonElement.GetRawText());
-                    if (valueDict != null && valueDict.TryGetValue("className", out var classNameObj) && classNameObj is string className)
-                    {
-                        object? convertedValue = null;
-                        switch (className)
-                        {
-                            case "datetime.datetime":
-                                if (valueDict.TryGetValue("iso", out var isoDt))
-                                    convertedValue = DateTime.Parse(isoDt?.ToString() ?? string.Empty, null, System.Globalization.DateTimeStyles.RoundtripKind);
-                                break;
-                            case "datetime.date":
-                                if (valueDict.TryGetValue("iso", out var isoDate))
-                                    convertedValue = DateTime.Parse(isoDate?.ToString() ?? string.Empty, null, System.Globalization.DateTimeStyles.RoundtripKind).Date;
-                                break;
-                            case "datetime.timedelta":
-                                if (valueDict.TryGetValue("microseconds", out var microsObj) && long.TryParse(microsObj?.ToString(), out var micros))
-                                    convertedValue = new TimeSpan(micros * 10);
-                                break;
-                            case "Literal":
-                                if (valueDict.ContainsKey("transaction_id"))
-                                {
-                                    var ap = BuildPointer(valueDict);
-                                    var literal = Transaction?.ReadObject(className, ap) as DbLiteral;
-                                    literal?.Load(Transaction);
-                                    convertedValue = literal;
-                                }
-                                else
-                                {
-                                    if (valueDict.TryGetValue("string", out var strObj))
-                                        convertedValue = Transaction?.GetLiteral(strObj?.ToString() ?? string.Empty);
-                                }
-                                break;
-                            default:
-                                if (valueDict.ContainsKey("transaction_id"))
-                                {
-                                    var ap = BuildPointer(valueDict);
-                                    convertedValue = Transaction?.ReadObject(className, ap);
-                                }
-                                else
-                                {
-                                    throw new ProtoValidationException($"Cannot load Atom of class {className} without a pointer.");
-                                }
-                                break;
-                        }
-                        if (convertedValue is not null)
-                            data[name] = convertedValue;
-                    }
-                    else
-                    {
-                        if (valueDict is not null)
-                            data[name] = valueDict;
-                    }
-                }
-                else if (value is JsonElement primitiveJe)
-                {
-                    data[name] = ConvertFromJsonElement(primitiveJe);
-                }
-                else
-                {
-                    data[name] = value!;
-                }
-            }
-            return data;
-        }
-
-        protected virtual Dictionary<string, object> DictToJson(Dictionary<string, object> data)
-        {
-            var jsonValue = new Dictionary<string, object>();
-            foreach (var (name, value) in data)
-            {
-                switch (value)
-                {
-                    case Atom atom:
-                    {
-                        if (atom.Transaction == null) atom.Transaction = Transaction;
-                        atom.Save();
-                        if (atom.AtomPointer == null) throw new ProtoCorruptionException($"Corruption saving nested Atom: attr={name}");
-                        jsonValue[name] = new Dictionary<string, object>
-                        {
-                            { "className", value.GetType().Name },
-                            { "transaction_id", atom.AtomPointer.TransactionId.ToString() },
-                            { "offset", atom.AtomPointer.Offset }
-                        };
-                        break;
-                    }
-                    case DateTime dt:
-                        jsonValue[name] = new Dictionary<string, object>
-                        {
-                            { "className", "datetime.datetime" },
-                            { "iso", dt.ToString("o") }
-                        };
-                        break;
-                    case TimeSpan ts:
-                        jsonValue[name] = new Dictionary<string, object>
-                        {
-                            { "className", "datetime.timedelta" },
-                            { "microseconds", ts.Ticks / 10 }
-                        };
-                        break;
-                    case byte[] bytes:
-                        jsonValue[name] = Convert.ToBase64String(bytes);
-                        break;
-                    case not null:
-                        jsonValue[name] = value;
-                        break;
-                }
-            }
-            return jsonValue;
-        }
-
-        public virtual void Save(ObjectTransaction? transaction = null)
-        {
-            if (transaction is null)
-                transaction = Transaction;
-            
-            Load(transaction);
-            if (AtomPointer != null) return;
-
-            _saved = true;
-            if (Transaction == null) throw new ProtoValidationException("An DBObject can only be saved within a given transaction!");
-
-            var jsonValue = new Dictionary<string, object>
+            var data = new Dictionary<string, object>
             {
                 { "className", GetType().Name }
             };
 
             if (this is DbLiteral literal)
             {
-                jsonValue["string"] = literal.Value;
+                data["string"] = literal.Value;
             }
             else
             {
@@ -368,7 +229,7 @@ namespace ProtoBaseNet
                         }
                         if (literalAtom.AtomPointer == null) throw new ProtoCorruptionException("Corruption saving string as literal!");
 
-                        jsonValue[field.Name] = new Dictionary<string, object>
+                        data[field.Name] = new Dictionary<string, object>
                         {
                             { "className", literalAtom.GetType().Name },
                             { "transaction_id", literalAtom.AtomPointer.TransactionId.ToString() },
@@ -377,20 +238,31 @@ namespace ProtoBaseNet
                     }
                     else
                     {
-                        jsonValue[field.Name] = value;
+                        data[field.Name] = value;
                     }
                 }
                 
                 foreach (var dynamicAttribute in GetDynamicAttributes())
                 {
-                    jsonValue[dynamicAttribute.Key] = dynamicAttribute.Value;
+                    data[dynamicAttribute.Key] = dynamicAttribute.Value;
                 }
             }
+            return data;
+        }
 
-            var finalJson = DictToJson(jsonValue);
-            var jsonString = JsonSerializer.Serialize(finalJson);
-            var bytes = System.Text.Encoding.UTF8.GetBytes(jsonString);
-            AtomPointer = Transaction.Storage.PushBytes(bytes).GetAwaiter().GetResult();
+        public virtual void Save(ObjectTransaction? transaction = null)
+        {
+            if (transaction is null)
+                transaction = Transaction;
+            
+            Load(transaction);
+            if (AtomPointer != null) return;
+
+            _saved = true;
+            if (Transaction == null) throw new ProtoValidationException("An DBObject can only be saved within a given transaction!");
+
+            var data = _toDictionary();
+            AtomPointer = Transaction.Storage.WriteAtom(data).GetAwaiter().GetResult();
 
             _saved = false;
         }
@@ -406,8 +278,6 @@ namespace ProtoBaseNet
             if (value is null) return null;
             if (targetType.IsInstanceOfType(value)) return value;
 
-            if (value is JsonElement je) return ConvertFromJsonElement(je, targetType);
-
             try
             {
                 return Convert.ChangeType(value, targetType);
@@ -416,40 +286,6 @@ namespace ProtoBaseNet
             {
                 return value;
             }
-        }
-
-        private static object? ConvertFromJsonElement(JsonElement je, Type? targetType = null)
-        {
-            try
-            {
-                return je.ValueKind switch
-                {
-                    JsonValueKind.String => targetType == typeof(DateTime)
-                        ? DateTime.Parse(je.GetString() ?? string.Empty, null, System.Globalization.DateTimeStyles.RoundtripKind)
-                        : je.GetString(),
-                    JsonValueKind.Number => targetType != null
-                        ? Convert.ChangeType(je.GetDouble(), targetType)
-                        : je.TryGetInt64(out var l) ? l : je.GetDouble(),
-                    JsonValueKind.True => true,
-                    JsonValueKind.False => false,
-                    JsonValueKind.Null => null,
-                    JsonValueKind.Object or JsonValueKind.Array => JsonSerializer.Deserialize<object>(je.GetRawText()),
-                    _ => je.ToString()
-                };
-            }
-            catch
-            {
-                return je.ToString();
-            }
-        }
-
-        private static AtomPointer BuildPointer(Dictionary<string, object> dict)
-        {
-            var txStr = dict.TryGetValue("transaction_id", out var t) ? t?.ToString() : null;
-            var offStr = dict.TryGetValue("offset", out var o) ? o?.ToString() : null;
-            if (!Guid.TryParse(txStr, out var gid)) throw new ProtoValidationException("Invalid transaction_id in atom pointer.");
-            if (!int.TryParse(offStr, out var off)) throw new ProtoValidationException("Invalid offset in atom pointer.");
-            return new AtomPointer(gid, off);
         }
     }
 }

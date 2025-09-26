@@ -48,7 +48,7 @@ public class IntegrationTests
         using (var transaction = db.NewTransaction())
         {
             var myList = (DbList<string>)transaction.GetRootObject("my_list")!;
-            var items = myList.AsIterable().ToList();
+            var items = myList.ToList();
             if (items.Count != 2 || items[0] != "hello" || items[1] != "world")
             {
                 throw new Exception("Data verification failed");

@@ -47,6 +47,10 @@ public class DbList<T> : DbCollection, IEnumerable<T>
     /// </summary>
     public new int Count { get; init; }
 
+    public DbList() : this(default, true, null, null, null, null, null)
+    {
+    }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DbList{T}"/> class.
     /// This constructor is used to create nodes initially loaded with a List values.
@@ -87,8 +91,12 @@ public class DbList<T> : DbCollection, IEnumerable<T>
         Previous = previous;
         Indexes = indexes;
 
-        var hasContent = (value is not null) || previous is not null || next is not null;
-        Empty = hasContent ? false : empty;
+        if (!EqualityComparer<T>.Default.Equals(value, default(T)))
+        {
+            empty = false;
+        }
+        
+        Empty = empty;
 
         if (!Empty)
         {

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace ProtoBaseNet
@@ -45,6 +46,20 @@ namespace ProtoBaseNet
         /// <param name="data">The byte array to persist.</param>
         /// <returns>A task that represents the asynchronous operation. The task result contains the pointer to the stored data.</returns>
         public abstract Task<AtomPointer> PushBytes(byte[] data);
+
+        /// <summary>
+        /// Retrieves atom data as a dictionary by its pointer.
+        /// </summary>
+        /// <param name="atomPointer">The pointer to the atom data to retrieve.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains the retrieved atom data as a dictionary.</returns>
+        public abstract Task<IDictionary<string, object>> ReadAtom(AtomPointer atomPointer);
+
+        /// <summary>
+        /// Persists atom data from a dictionary and returns the resulting pointer.
+        /// </summary>
+        /// <param name="data">The atom data to persist.</param>
+        /// <returns>A task that represents the asynchronous operation. The task result contains the pointer to the stored atom data.</returns>
+        public abstract Task<AtomPointer> WriteAtom(IDictionary<string, object> data);
 
         /// <summary>
         /// Acquires a root-context guard for critical sections, such as root updates.

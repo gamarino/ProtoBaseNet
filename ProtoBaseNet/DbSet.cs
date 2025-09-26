@@ -31,9 +31,9 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// <summary>
     /// Initializes a new instance of the <see cref="DbSet{T}"/> class.
     /// </summary>
-    public DbSet(IEnumerable<T> initialItems)
+    public DbSet(IEnumerable<T> initialItems) : this()
     {
-        var newSet = new DbSet<T>();
+        var newSet = this;
         foreach (var item in initialItems)
         {
             newSet = newSet.Add(item);
@@ -41,6 +41,10 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
 
         Content = newSet.Content;
         _temporaryContent = newSet._temporaryContent;
+    }
+
+    public DbSet() : this(null, null, null, null, null)
+    {
     }
 
     private DbSet(

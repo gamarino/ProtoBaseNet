@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
 namespace ProtoBaseNet;
 
 // In-memory implementation of SharedStorage for testing and single-process scenarios.
@@ -11,6 +15,7 @@ public class MemoryStorage : SharedStorage
     // In-memory maps of pointers to atoms and raw bytes.
     private readonly Dictionary<AtomPointer, Atom> _atoms = new();
     private readonly Dictionary<AtomPointer, byte[]> _bytes = new();
+    private readonly Dictionary<AtomPointer, IDictionary<string, object>> _atomData = new();
 
     // Current root pointer for snapshot navigation.
     private AtomPointer _currentRoot = new AtomPointer();
@@ -43,6 +48,20 @@ public class MemoryStorage : SharedStorage
     {
         var pointer = new AtomPointer();
         _bytes[pointer] = data;
+        return Task.FromResult(pointer);
+    }
+
+    // Stores atom data as a dictionary and returns a new pointer.
+    public override Task<IDictionary<string, object>> ReadAtom(AtomPointer atomPointer)
+    {
+        return Task.FromResult(_atomData[atomPointer]);
+    }
+
+    // Retrieves atom data as a dictionary by pointer.
+    public override Task<AtomPointer> WriteAtom(IDictionary<string, object> data)
+    {
+        var pointer = new AtomPointer();
+        _atomData[pointer] = data;
         return Task.FromResult(pointer);
     }
 

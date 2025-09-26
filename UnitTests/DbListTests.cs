@@ -83,7 +83,7 @@ namespace MainTests
             {
                 list = list.AppendLast(item);
             }
-            var nativeList = list.AsIterable().ToList();
+            var nativeList = list.ToList();
             Assert.That(nativeList, Is.EqualTo(items));
         }
     }
