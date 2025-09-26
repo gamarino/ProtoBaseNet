@@ -98,5 +98,48 @@ namespace MainTests
             Assert.That(finalState.Has("b"), Is.True);
             Assert.That(finalState.Has("c"), Is.True);
         }
+
+        private class HashCollisionObject
+        {
+            public string Value { get; }
+
+            public HashCollisionObject(string value)
+            {
+                Value = value;
+            }
+
+            public override int GetHashCode()
+            {
+                return 1;
+            }
+
+            public override bool Equals(object obj)
+            {
+                if (obj is HashCollisionObject other)
+                {
+                    return Value == other.Value;
+                }
+                return false;
+            }
+        }
+
+        [Test]
+        public void HandleHashCollision()
+        {
+            var obj1 = new HashCollisionObject("a");
+            var obj2 = new HashCollisionObject("b");
+
+            var set = new DbSet<HashCollisionObject>();
+            var newSet = set.Add(obj1).Add(obj2);
+
+            Assert.That(newSet.Count, Is.EqualTo(2));
+            Assert.That(newSet.Has(obj1), Is.True);
+            Assert.That(newSet.Has(obj2), Is.True);
+
+            var finalSet = newSet.RemoveAt(obj1);
+            Assert.That(finalSet.Count, Is.EqualTo(1));
+            Assert.That(finalSet.Has(obj1), Is.False);
+            Assert.That(finalSet.Has(obj2), Is.True);
+        }
     }
 }

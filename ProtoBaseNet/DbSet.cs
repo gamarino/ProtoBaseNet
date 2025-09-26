@@ -20,7 +20,7 @@ using System.Text;
 /// </remarks>
 public class DbSet<T> : DbCollection, IEnumerable<T>
 {
-    private DbHashDictionary<T> Content { get; set; }
+    private DbHashDictionary<HashCollisionNode<T>> Content { get; set; }
     private HashSet<T> _temporaryContent { get; set; }
     private List<Func<DbSet<T>, DbSet<T>>> _oplog;
 
@@ -50,7 +50,7 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     }
 
     private DbSet(
-        DbHashDictionary<T>? content = null, 
+        DbHashDictionary<HashCollisionNode<T>>? content = null, 
         HashSet<T>? temporaryContent = null,
         DbDictionary<Index>? indexes = null,
         Guid? stableId = null,
@@ -119,9 +119,21 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     {
         if (key is null) return false;
         var h = StableHash(key!);
-        if (Content.Has(h)) return true;
+
+        if (Content.Has(h))
+        {
+            var node = Content.GetAt(h);
+            while (node != null)
+            {
+                if (node.Value.Equals(key))
+                    return true;
+                node = node.Next;
+            }
+        }
+
         if ((key is Atom) && (key as Atom).Transaction == null)
             return _temporaryContent.Contains(key);
+
         return false;
     }
 
@@ -153,7 +165,20 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         }
 
         var h = StableHash(key);
-        var newContent = Content.SetAt(h, key);
+        var newContent = Content;
+
+        if (Content.Has(h))
+        {
+            var node = Content.GetAt(h);
+            var newNode = new HashCollisionNode<T>(key, node);
+            newContent = Content.SetAt(h, newNode);
+        }
+        else
+        {
+            var newNode = new HashCollisionNode<T>(key);
+            newContent = Content.SetAt(h, newNode);
+        }
+
         return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction, _oplog);
     }
 
@@ -190,11 +215,36 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
 
         if (newContent.Has(h))
         {
-            newContent = newContent.RemoveAt(h);
+            var node = newContent.GetAt(h);
+            var newFirstNode = RemoveFromChain(node, key);
+            if (newFirstNode == null)
+                newContent = newContent.RemoveAt(h);
+            else
+                newContent = newContent.SetAt(h, newFirstNode);
+            
             return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction, _oplog);
         }
         else
             return this;
+    }
+
+    private HashCollisionNode<T>? RemoveFromChain(HashCollisionNode<T> firstNode, T key)
+    {
+        if (firstNode.Value.Equals(key))
+            return firstNode.Next;
+
+        var currentNode = firstNode;
+        while (currentNode.Next != null)
+        {
+            if (currentNode.Next.Value.Equals(key))
+            {
+                currentNode = new HashCollisionNode<T>(currentNode.Value, currentNode.Next.Next);
+                return firstNode;
+            }
+            currentNode = currentNode.Next;
+        }
+
+        return firstNode;
     }
 
     public DbSet<T> ConcurrentUpdate(DbSet<T> currentRoot)
@@ -218,7 +268,19 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
             {
                 if (item is Atom valueAtom)
                     valueAtom.Save();
-                Content = Content.SetAt(StableHash(item), item);
+
+                var h = StableHash(item);
+                if (Content.Has(h))
+                {
+                    var node = Content.GetAt(h);
+                    var newNode = new HashCollisionNode<T>(item, node);
+                    Content = Content.SetAt(h, newNode);
+                }
+                else
+                {
+                    var newNode = new HashCollisionNode<T>(item);
+                    Content = Content.SetAt(h, newNode);
+                }
             }
 
             _temporaryContent.Clear();
@@ -274,8 +336,16 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     
     public IEnumerator<T> GetEnumerator()
     {
-        foreach (var item in Content)
-            yield return item;
+        foreach (var node in Content)
+        {
+            var currentNode = node;
+            while (currentNode != null)
+            {
+                yield return currentNode.Value;
+                currentNode = currentNode.Next;
+            }
+        }
+
         foreach (var item in _temporaryContent)
             yield return item;
     }
