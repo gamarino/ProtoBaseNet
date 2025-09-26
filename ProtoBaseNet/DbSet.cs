@@ -21,7 +21,8 @@ using System.Text;
 public class DbSet<T> : DbCollection, IEnumerable<T>
 {
     private DbHashDictionary<T> Content { get; set; }
-    private HashSet<T> _temporaryContent { get; init; }
+    private HashSet<T> _temporaryContent { get; set; }
+    private List<Func<DbSet<T>, DbSet<T>>> _oplog;
 
     /// <summary>
     /// Gets the total number of elements in the set, including staged and persisted elements.
@@ -41,9 +42,10 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
 
         Content = newSet.Content;
         _temporaryContent = newSet._temporaryContent;
+        _oplog = newSet._oplog;
     }
 
-    public DbSet() : this(null, null, null, null, null)
+    public DbSet() : this(null, null, null, null, null, null)
     {
     }
 
@@ -52,7 +54,8 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         HashSet<T>? temporaryContent = null,
         DbDictionary<Index>? indexes = null,
         Guid? stableId = null,
-        ObjectTransaction? transaction = null) : base(stableId, indexes, transaction)
+        ObjectTransaction? transaction = null,
+        List<Func<DbSet<T>, DbSet<T>>>? oplog = null) : base(stableId, indexes, transaction)
     {
         if (content != null)
             Content = content;
@@ -63,6 +66,8 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
             _temporaryContent = temporaryContent;
         else
             _temporaryContent = new HashSet<T>();
+        
+        _oplog = oplog ?? new List<Func<DbSet<T>, DbSet<T>>>();
     }
 
     private static int StableHash(object? key)
@@ -128,21 +133,28 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     public DbSet<T> Add(T key)
     {
         if (Has(key)) return this;
-        
+
+        var newOplog = new List<Func<DbSet<T>, DbSet<T>>>(_oplog) { (s) => s.AddImpl(key) };
+
+        return new DbSet<T>(Content, _temporaryContent, Indexes, StableId, Transaction, newOplog).AddImpl(key);
+    }
+    
+    private DbSet<T> AddImpl(T key)
+    {
         var newIndexes = ObjectAddToIndexes(key);
         
         if (key is Atom && (key as Atom).Transaction == null)
         {
             if (_temporaryContent.Contains(key))
                 return this;
-            var newTemporaryContent = _temporaryContent;
+            var newTemporaryContent = new HashSet<T>(_temporaryContent);
             newTemporaryContent.Add(key);
-            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction);
+            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction, _oplog);
         }
 
         var h = StableHash(key);
         var newContent = Content.SetAt(h, key);
-        return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction);
+        return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction, _oplog);
     }
 
     /// <summary>
@@ -152,8 +164,16 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     /// <returns>A new set with the element removed, or the same set if the element is not present.</returns>
     public DbSet<T> RemoveAt(T key)
     {
-        var h = StableHash(key!);
         if (!Has(key)) return this;
+
+        var newOplog = new List<Func<DbSet<T>, DbSet<T>>>(_oplog) { (s) => s.RemoveAtImpl(key) };
+
+        return new DbSet<T>(Content, _temporaryContent, Indexes, StableId, Transaction, newOplog).RemoveAtImpl(key);
+    }
+    
+    private DbSet<T> RemoveAtImpl(T key)
+    {
+        var h = StableHash(key!);
         
         var newIndexes = ObjectRemoveFromIndexes(key);
         
@@ -161,9 +181,9 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         {
             if (!_temporaryContent.Contains(key))
                 return this;
-            var newTemporaryContent = _temporaryContent;
+            var newTemporaryContent = new HashSet<T>(_temporaryContent);
             newTemporaryContent.Remove(key);
-            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction);
+            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction, _oplog);
         }
 
         var newContent = Content;
@@ -171,12 +191,22 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         if (newContent.Has(h))
         {
             newContent = newContent.RemoveAt(h);
-            return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction);
+            return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction, _oplog);
         }
         else
             return this;
     }
 
+    public DbSet<T> ConcurrentUpdate(DbSet<T> currentRoot)
+    {
+        var newSet = currentRoot;
+        foreach (var op in _oplog)
+        {
+            newSet = op(newSet);
+        }
+        return newSet;
+    }
+    
     /// <summary>
     /// Promotes staged elements to the persisted content.
     /// </summary>

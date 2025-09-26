@@ -72,5 +72,31 @@ namespace MainTests
 
             Assert.That(list, Is.EqualTo(items));
         }
+        
+        [Test]
+        public void ConcurrentUpdate_ShouldReapplyOperations()
+        {
+            // 1. Initial state
+            var initialState = new DbSet<string>(new[] { "a" });
+
+            // 2. Transaction 1 starts and adds "b"
+            var tx1 = initialState.Add("b");
+
+            // 3. Transaction 2 starts from the *same initial state* and adds "c"
+            var tx2 = initialState.Add("c");
+
+            // 4. Transaction 1 commits, so its state is now the current state.
+            var currentState = tx1;
+
+            // 5. Transaction 2 attempts to commit. A concurrency conflict is detected.
+            //    We must re-apply the operations from tx2 onto the new current state.
+            var finalState = tx2.ConcurrentUpdate(currentState);
+
+            // 6. Verify the final state
+            Assert.That(finalState.Count, Is.EqualTo(3));
+            Assert.That(finalState.Has("a"), Is.True);
+            Assert.That(finalState.Has("b"), Is.True);
+            Assert.That(finalState.Has("c"), Is.True);
+        }
     }
 }

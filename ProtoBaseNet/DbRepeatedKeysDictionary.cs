@@ -107,6 +107,7 @@ public class DbRepeatedKeysDictionary<T> : DbCollection, IEnumerable<KeyValuePai
     }
 
     public IEnumerator<KeyValuePair<string, T>> GetEnumerator()
+
     {
         foreach (var item in Values)
             foreach (var instance in item.Value)
