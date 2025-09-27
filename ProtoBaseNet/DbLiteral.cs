@@ -10,7 +10,7 @@ public class DbLiteral : Atom
 
     // Constructs a literal with the provided string value.
     // The transaction/pointer lifecycle is managed by the Atom base when saved/loaded.
-    public DbLiteral(string value)
+    public DbLiteral(string value, ObjectTransaction? transaction = null) : base(transaction)
     {
         Value = value;
     }

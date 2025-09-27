@@ -10,12 +10,40 @@ public class IntegrationTests
     public static void Main(string[] args)
     {
         Console.WriteLine("Running integration tests...");
-        TestFileStorage().Wait();
+        TestMemoryStorage().Wait();
         Console.WriteLine("Integration tests passed!");
     }
 
+    public static async Task TestMemoryStorage()
+    {
+        // 1. Create a FileStorage instance
+        var storage = new MemoryStorage();
+        var objectSpace = new ObjectSpace(storage);
+
+        // 2. Create a new database
+        var db = objectSpace.NewDatabase("MyTestDb");
+
+        // 3. Start a transaction
+        using (var transaction = db.NewTransaction())
+        {
+            // 4. Create an immutable list and set it as a root object
+            var myList = new DbList<string>();
+            myList = myList.AppendLast("hello");
+            myList = myList.AppendLast("world");
+            transaction.SetRootObject("my_list", myList);
+
+            // 5. Commit the transaction
+            transaction.Commit();
+        }
+
+        // 6. Close the ObjectSpace
+        objectSpace.Close();
+    }
+    
     public static async Task TestFileStorage()
     {
+        var FilePath = "IntegrationTest";
+        
         // 1. Create a FileStorage instance
         var storage = new FileStorage(FilePath);
         var objectSpace = new ObjectSpace(storage);
@@ -60,9 +88,6 @@ public class IntegrationTests
         {
             File.Delete(FilePath);
         }
-        if (File.Exists($"{FilePath}.root"))
-        {
-            File.Delete($"{FilePath}.root");
-        }
     }
+
 }
