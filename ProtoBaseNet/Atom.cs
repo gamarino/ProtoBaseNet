@@ -127,7 +127,7 @@ namespace ProtoBaseNet
         
         public virtual void Load(ObjectTransaction? transaction)
         {
-            if (_loaded) return;
+            if (AtomPointer == null) return;
             
             if (transaction is null)
                 Transaction = transaction;
@@ -259,12 +259,11 @@ namespace ProtoBaseNet
             if (AtomPointer != null) return;
 
             _saved = true;
-            if (Transaction == null) throw new ProtoValidationException("An DBObject can only be saved within a given transaction!");
+            if (transaction == null) throw new ProtoValidationException("An DBObject can only be saved within a given transaction!");
 
             var data = _toDictionary();
-            AtomPointer = Transaction.Storage.WriteAtom(data).GetAwaiter().GetResult();
+            AtomPointer = transaction.Storage.WriteAtom(data).GetAwaiter().GetResult();
 
-            _saved = false;
         }
 
         public override int GetHashCode()

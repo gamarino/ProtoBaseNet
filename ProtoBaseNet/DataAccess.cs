@@ -114,7 +114,7 @@ namespace ProtoBaseNet
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
                         newHistory.Transaction = updateTr;
-                        newHistory.Save();
+                        newHistory.Save(updateTr);
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
 
                         return new Database(this, databaseName);
@@ -162,7 +162,7 @@ namespace ProtoBaseNet
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
                         newHistory.Transaction = updateTr;
-                        newHistory.Save();
+                        newHistory.Save(updateTr);
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
                     }
                     else
@@ -202,7 +202,7 @@ namespace ProtoBaseNet
                         var spaceHistory = GetSpaceHistory();
                         var newHistory = spaceHistory.InsertAt(0, newSpaceRoot);
                         newHistory.Transaction = updateTr;
-                        newHistory.Save();
+                        newHistory.Save(updateTr);
                         Storage.SetCurrentRoot(newHistory.AtomPointer!);
                     }
                     else
@@ -263,7 +263,7 @@ namespace ProtoBaseNet
 
             newSpaceRoot.Transaction = updateTr;
             var newSpaceHistory = spaceHistory.InsertAt(0, newSpaceRoot);
-            newSpaceHistory.Save();
+            newSpaceHistory.Save(updateTr);
 
             Storage.SetCurrentRoot(newSpaceHistory.AtomPointer!);
         }
@@ -598,8 +598,7 @@ namespace ProtoBaseNet
                     newDbRoot = newDbRoot.SetAt(key, stagedAtom!);
                 }
 
-                newDbRoot.Transaction = this;
-                newDbRoot.Save();
+                newDbRoot.Save(this);
                 Database.SetDbRoot(newDbRoot);
             }
         }
