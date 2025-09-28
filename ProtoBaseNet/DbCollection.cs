@@ -58,7 +58,7 @@ namespace ProtoBaseNet
         /// <summary>
         /// Gets the logical item count of the collection.
         /// </summary>
-        public int Count { get; } = 0;
+        public int Count { get; init; }
 
         public ObjectTransaction? Transaction { get; set; }
 

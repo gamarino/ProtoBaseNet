@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Xml;
 
 namespace ProtoBaseNet;
 
@@ -20,21 +21,26 @@ public class MemoryStorage : SharedStorage
     // Current root pointer for snapshot navigation.
     private AtomPointer _currentRoot = new AtomPointer();
 
-    // Gate for potential synchronization across threads (not actively used here).
+    // Gate for potential synchronization across threads
     private readonly object _lock = new object();
+    private readonly object _rootLock = new object();
 
     // Stores a materialized Atom and returns a new pointer.
     public override Task<AtomPointer> PushAtom(Atom atom)
     {
-        var pointer = new AtomPointer();
-        _atoms[pointer] = atom;
-        return Task.FromResult(pointer);
+        lock (_lock)
+        {
+            var pointer = new AtomPointer();
+            _atoms[pointer] = atom;
+            return Task.FromResult(pointer);
+        }
     }
 
     // Retrieves a previously stored Atom by pointer.
     public override Task<Atom> GetAtom(AtomPointer atomPointer)
     {
-        return Task.FromResult(_atoms[atomPointer]);
+        lock (_lock)
+            return Task.FromResult(_atoms[atomPointer]);
     }
 
     // Retrieves raw bytes by pointer.
@@ -75,13 +81,15 @@ public class MemoryStorage : SharedStorage
     // Returns the current root pointer.
     public override AtomPointer ReadCurrentRoot()
     {
-        return _currentRoot;
+        lock (_rootLock)
+            return _currentRoot;
     }
 
     // Sets the current root pointer.
     public override void SetCurrentRoot(AtomPointer newRootPointer)
     {
-        _currentRoot = newRootPointer;
+        lock (_rootLock)
+            _currentRoot = newRootPointer;
     }
 
     // No-op: there is no WAL for in-memory storage.
@@ -93,8 +101,11 @@ public class MemoryStorage : SharedStorage
     // Clears all in-memory data structures.
     public override void Close()
     {
-        _atoms.Clear();
-        _bytes.Clear();
+        lock (_lock)
+        {
+            _atoms.Clear();
+            _bytes.Clear();
+        }
     }
 
     // Simple disposable that executes the provided action on Dispose.
@@ -108,7 +119,7 @@ public class MemoryStorage : SharedStorage
         }
 
         public void Dispose()
-        {
+        { 
             _action();
         }
     }

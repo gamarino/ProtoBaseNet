@@ -12,6 +12,7 @@ namespace ProtoBaseNet
     public class FileStorage : SharedStorage, IDisposable
     {
         private const int RootSize = 1024;
+        private const int HeaderGap = 512;
         private readonly string _filePath;
         private readonly int _pageSize;
         private readonly int _cacheDepth;
@@ -77,8 +78,9 @@ namespace ProtoBaseNet
             else
             {
                 _currentRoot = new AtomPointer(Guid.Empty, 0);
-                _currentPageNumber = 0;
-                _currentPageOffset = 0;
+                _currentPageNumber = HeaderGap / _pageSize;
+                _currentPageOffset = HeaderGap % _pageSize;
+                FlushRootInternal();
             }
             
             _currentPage = new byte[_pageSize];
@@ -117,7 +119,7 @@ namespace ProtoBaseNet
             {
                 var pageNumber = _currentPageNumber;
                 var pageOffset = _currentPageOffset;
-                var pointer = new AtomPointer(Guid.Empty, (int)((long)pageNumber * _pageSize + pageOffset + RootSize));
+                var pointer = new AtomPointer(Guid.Empty, (int)((long)pageNumber * _pageSize + pageOffset));
 
                 // Write the length of the atom as an 8-byte long.
                 var lengthBytes = BitConverter.GetBytes((long)bytes.Length);
@@ -170,7 +172,7 @@ namespace ProtoBaseNet
                     {
                         using (var stream = new FileStream(_filePath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None))
                         {
-                            stream.Position = RootSize + (long)pageToWrite.pageNumber * _pageSize;
+                            stream.Position = (long)pageToWrite.pageNumber * _pageSize;
                             stream.Write(pageToWrite.data, 0, pageToWrite.data.Length);
                         }
                     }
@@ -192,13 +194,16 @@ namespace ProtoBaseNet
         /// <returns>The retrieved byte array.</returns>
         public override Task<byte[]> GetBytes(AtomPointer pointer)
         {
-            // First, read the 8-byte length prefix.
-            var lengthBytes = ReadData(pointer.Offset, 8);
-            var length = BitConverter.ToInt64(lengthBytes, 0);
+            lock (_fileLock)
+            {
+                // First, read the 8-byte length prefix.
+                var lengthBytes = ReadData(pointer.Offset, 8);
+                var length = BitConverter.ToInt64(lengthBytes, 0);
 
-            // Now, read the actual data.
-            var data = ReadData(pointer.Offset + 8, (int)length);
-            return Task.FromResult(data);
+                // Now, read the actual data.
+                var data = ReadData(pointer.Offset + 8, (int)length);
+                return Task.FromResult(data);
+            }
         }
 
         private byte[] ReadData(int position, int length)
@@ -211,8 +216,8 @@ namespace ProtoBaseNet
 
             while (remainingLength > 0)
             {
-                var pageNumber = (currentPosition - RootSize) / _pageSize;
-                var pageOffset = (currentPosition - RootSize) % _pageSize;
+                var pageNumber = currentPosition / _pageSize;
+                var pageOffset = currentPosition % _pageSize;
                 var page = GetPage(pageNumber);
 
                 var bytesToRead = Math.Min(remainingLength, _pageSize - pageOffset);
@@ -228,17 +233,32 @@ namespace ProtoBaseNet
 
         private byte[] GetPage(int pageNumber)
         {
+            // Check if it is currentPage
+            if (pageNumber == _currentPageNumber)
+            {
+                return _currentPage;
+            }
+
+            // Check if it is in the write queue
+            foreach (var item in _writeQueue)
+            {
+                if (item.pageNumber == pageNumber)
+                    return item.data;
+            }
+            
+            // Check if it is in the cache
             if (_pageCache.TryGetValue(pageNumber, out var page))
             {
                 return page;
             }
-
+            
+            // Last resort, read it from the file
             lock (_fileLock)
             {
                 using (var stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
                     var pageData = new byte[_pageSize];
-                    stream.Position = RootSize + (long)pageNumber * _pageSize;
+                    stream.Position = (long)pageNumber * _pageSize;
                     stream.Read(pageData, 0, _pageSize);
                     AddToCache(pageNumber, pageData);
                     return pageData;
@@ -279,7 +299,6 @@ namespace ProtoBaseNet
             {
                 _currentRoot = pointer;
                 _rootDirty = true;
-                _lastRootUpdateTime = DateTime.UtcNow;
             }
         }
 
@@ -295,7 +314,8 @@ namespace ProtoBaseNet
         {
             lock (_rootLock)
             {
-                if (_rootDirty && (DateTime.UtcNow - _lastRootUpdateTime).TotalSeconds > 10)
+                if ((_lastRootUpdateTime != default) || 
+                    (_rootDirty && (DateTime.UtcNow - _lastRootUpdateTime).TotalSeconds > 10))
                 {
                     FlushRootInternal();
                 }
@@ -320,9 +340,10 @@ namespace ProtoBaseNet
                     Buffer.BlockCopy(bytes, 0, rootBytes, 0, bytes.Length);
                     stream.Position = 0;
                     stream.Write(rootBytes, 0, RootSize);
+                    _rootDirty = false;
+                    _lastRootUpdateTime = DateTime.Now;
                 }
             }
-            _rootDirty = false;
         }
 
         public override void Close()
@@ -332,7 +353,9 @@ namespace ProtoBaseNet
 
         public override void FlushWal()
         {
-            // No-op for this implementation
+            EnqueuePageWrite();
+            _currentPageNumber++;
+            _currentPageOffset = 0;
         }
 
         public override IDisposable RootContextManager()
@@ -342,10 +365,12 @@ namespace ProtoBaseNet
 
         public void Dispose()
         {
+            FlushWal();
+            _lastRootUpdateTime = default;
+            FlushRootInternal();
             _disposing = true;
             _rootFlushTimer?.Dispose();
             _writeThread.Join();
-            FlushRootInternal();
         }
 
         private class FileStorageContextManager : IDisposable

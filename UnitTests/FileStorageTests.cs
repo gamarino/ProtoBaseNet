@@ -74,6 +74,9 @@ namespace MainTests
             var pointer = await _storage.PushBytes(data);
             var retrievedData = await _storage.GetBytes(pointer);
             
+            var length = retrievedData.Length;
+            Console.WriteLine("Length: %d\n", length);
+            Assert.That(length, Is.EqualTo(data.Length));
             Assert.That(retrievedData, Is.EqualTo(data));
         }
     }

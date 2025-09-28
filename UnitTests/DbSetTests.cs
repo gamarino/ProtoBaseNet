@@ -129,8 +129,9 @@ namespace MainTests
             var obj1 = new HashCollisionObject("a");
             var obj2 = new HashCollisionObject("b");
 
-            var set = new DbSet<HashCollisionObject>();
-            var newSet = set.Add(obj1).Add(obj2);
+            DbSet<HashCollisionObject> newSet = new DbSet<HashCollisionObject>();
+            newSet = newSet.Add(obj1);
+            newSet = newSet.Add(obj2);
 
             Assert.That(newSet.Count, Is.EqualTo(2));
             Assert.That(newSet.Has(obj1), Is.True);

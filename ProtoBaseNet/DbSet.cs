@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Transactions;
 
 namespace ProtoBaseNet;
@@ -21,20 +22,15 @@ using System.Text;
 public class DbSet<T> : DbCollection, IEnumerable<T>
 {
     private DbHashDictionary<HashCollisionNode<T>> Content { get; set; }
-    private HashSet<T> _temporaryContent { get; set; }
-    private List<Func<DbSet<T>, DbSet<T>>> _oplog;
-
-    /// <summary>
-    /// Gets the total number of elements in the set, including staged and persisted elements.
-    /// </summary>
-    public int Count => (Content?.Count ?? 0);
+    private ImmutableDictionary<int, HashCollisionNode<T>> _temporaryContent { get; init; }
+    private ImmutableList<KeyValuePair<string, T>> _oplog = ImmutableList<KeyValuePair<string, T>>.Empty;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DbSet{T}"/> class.
     /// </summary>
     public DbSet(IEnumerable<T> initialItems) : this()
     {
-        var newSet = this;
+        var newSet = new DbSet<T>();
         foreach (var item in initialItems)
         {
             newSet = newSet.Add(item);
@@ -43,31 +39,38 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         Content = newSet.Content;
         _temporaryContent = newSet._temporaryContent;
         _oplog = newSet._oplog;
+        Count = newSet.Count;
     }
 
-    public DbSet() : this(null, null, null, null, null, null)
+    public DbSet() : this(null, 0, null, null, null, null, null)
     {
     }
 
     private DbSet(
-        DbHashDictionary<HashCollisionNode<T>>? content = null, 
-        HashSet<T>? temporaryContent = null,
+        DbHashDictionary<HashCollisionNode<T>>? content = null,
+        int count = 0,
+        ImmutableDictionary<int, HashCollisionNode<T>>? temporaryContent = null,
         DbDictionary<Index>? indexes = null,
         Guid? stableId = null,
         ObjectTransaction? transaction = null,
-        List<Func<DbSet<T>, DbSet<T>>>? oplog = null) : base(stableId, indexes, transaction)
+        ImmutableList<KeyValuePair<string, T>>? oplog = null) : base(stableId, indexes, transaction)
     {
         if (content != null)
             Content = content;
         else
             Content = new();
 
+        Count = count;
+
         if (temporaryContent != null)
             _temporaryContent = temporaryContent;
         else
-            _temporaryContent = new HashSet<T>();
+            _temporaryContent = ImmutableDictionary<int, HashCollisionNode<T>>.Empty;
         
-        _oplog = oplog ?? new List<Func<DbSet<T>, DbSet<T>>>();
+        if (oplog != null)
+            _oplog = oplog;
+        else 
+            _oplog = ImmutableList<KeyValuePair<string, T>>.Empty;
     }
 
     private static int StableHash(object? key)
@@ -120,21 +123,35 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         if (key is null) return false;
         var h = StableHash(key!);
 
-        if (Content.Has(h))
+        if ((key is Atom) && (key as Atom).AtomPointer == null)
         {
-            var node = Content.GetAt(h);
-            while (node != null)
-            {
-                if (node.Value.Equals(key))
-                    return true;
-                node = node.Next;
-            }
+            if (!_temporaryContent.ContainsKey(h))
+                return false;
+
+            HashCollisionNode<T>? currentNode = _temporaryContent.ElementAt(h).Value;
+            while (currentNode != null && !currentNode.Value.Equals(key))
+                currentNode = currentNode.Next;
+
+            if (currentNode != null)
+                return true;
+
+            return false;
         }
+        else
+        {
+            if (Content.Has(h))
+            {
+                var node = Content.GetAt(h);
+                while (node != null)
+                {
+                    if (node.Value.Equals(key))
+                        return true;
+                    node = node.Next;
+                }
+            }
 
-        if ((key is Atom) && (key as Atom).Transaction == null)
-            return _temporaryContent.Contains(key);
-
-        return false;
+            return false;
+        }
     }
 
     /// <summary>
@@ -146,41 +163,40 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     {
         if (Has(key)) return this;
 
-        var newOplog = new List<Func<DbSet<T>, DbSet<T>>>(_oplog) { (s) => s.AddImpl(key) };
-
-        return new DbSet<T>(Content, _temporaryContent, Indexes, StableId, Transaction, newOplog).AddImpl(key);
-    }
-    
-    private DbSet<T> AddImpl(T key)
-    {
-        var newIndexes = ObjectAddToIndexes(key);
-        
-        if (key is Atom && (key as Atom).Transaction == null)
-        {
-            if (_temporaryContent.Contains(key))
-                return this;
-            var newTemporaryContent = new HashSet<T>(_temporaryContent);
-            newTemporaryContent.Add(key);
-            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction, _oplog);
-        }
-
-        var h = StableHash(key);
         var newContent = Content;
+        var newTemporaryContent = _temporaryContent;
+        HashCollisionNode<T> currentListOfValues;
+        var hashValue = StableHash(key);
 
-        if (Content.Has(h))
+        if (key is Atom valueAtom && valueAtom.AtomPointer == null)
         {
-            var node = Content.GetAt(h);
-            var newNode = new HashCollisionNode<T>(key, node);
-            newContent = Content.SetAt(h, newNode);
+            KeyValuePair<int, HashCollisionNode<T>>? currentNode = _temporaryContent.ElementAt(hashValue);
+            if (currentNode != null)
+            {
+                currentListOfValues = currentNode.Value.Value;
+                currentListOfValues = new HashCollisionNode<T>(key, currentListOfValues);
+            }
+            else
+                currentListOfValues = new HashCollisionNode<T>(key, null);
+
+            newTemporaryContent = newTemporaryContent.Add(hashValue, currentListOfValues);
         }
         else
         {
-            var newNode = new HashCollisionNode<T>(key);
-            newContent = Content.SetAt(h, newNode);
-        }
+            currentListOfValues = Content.GetAt(hashValue);
+            if (currentListOfValues != null)
+                currentListOfValues = new HashCollisionNode<T>(key, currentListOfValues);
+            else
+                currentListOfValues = new HashCollisionNode<T>(key, null);
 
-        return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction, _oplog);
+            newContent = newContent.SetAt(hashValue, currentListOfValues);
+        }
+        
+        var newOplog = _oplog.Add(new KeyValuePair<string, T>("Add", key));
+
+        return new DbSet<T>(newContent, Count + 1, _temporaryContent, Indexes, StableId, Transaction, newOplog);
     }
+    
 
     /// <summary>
     /// Removes an element from the set.
@@ -191,68 +207,99 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
     {
         if (!Has(key)) return this;
 
-        var newOplog = new List<Func<DbSet<T>, DbSet<T>>>(_oplog) { (s) => s.RemoveAtImpl(key) };
-
-        return new DbSet<T>(Content, _temporaryContent, Indexes, StableId, Transaction, newOplog).RemoveAtImpl(key);
-    }
-    
-    private DbSet<T> RemoveAtImpl(T key)
-    {
-        var h = StableHash(key!);
-        
-        var newIndexes = ObjectRemoveFromIndexes(key);
-        
-        if (key is Atom && (key as Atom).Transaction == null)
-        {
-            if (!_temporaryContent.Contains(key))
-                return this;
-            var newTemporaryContent = new HashSet<T>(_temporaryContent);
-            newTemporaryContent.Remove(key);
-            return new DbSet<T>(Content, newTemporaryContent, newIndexes, StableId, Transaction, _oplog);
-        }
-
         var newContent = Content;
+        var newTemporaryContent = _temporaryContent;
+        HashCollisionNode<T>? newFirstNode = null;
+        var hashValue = StableHash(key);
 
-        if (newContent.Has(h))
+        List<HashCollisionNode<T>> nodesToCopy = new List<HashCollisionNode<T>>();
+        if ((key is Atom valueAtom) && (valueAtom.AtomPointer == null))
         {
-            var node = newContent.GetAt(h);
-            var newFirstNode = RemoveFromChain(node, key);
-            if (newFirstNode == null)
-                newContent = newContent.RemoveAt(h);
+            KeyValuePair<int, HashCollisionNode<T>>? currentElement = _temporaryContent.ElementAt(hashValue);
+            HashCollisionNode<T> currentNode = currentElement.Value.Value;
+            while (currentNode != null && !(currentNode.Value.Equals(key)))
+            {
+                nodesToCopy.Add(currentNode);
+                currentNode = currentNode.Next;
+            }
+
+            if (currentNode != null)
+                if (nodesToCopy.Count == 0)
+                    newFirstNode = currentNode.Next;
+                else
+                {
+                    int currentIndex = nodesToCopy.Count - 1;
+                    var nextNode = currentNode.Next;
+                    while (currentIndex >= 0)
+                    {
+                        var oldNode = nodesToCopy.ElementAt(currentIndex);
+                        nextNode = new HashCollisionNode<T>(oldNode.Value, nextNode);
+                        currentIndex--;
+                    }
+
+                    newFirstNode = nextNode;
+                }
+
+            if (newFirstNode != null)
+                newTemporaryContent = _temporaryContent.Add(hashValue, newFirstNode);
             else
-                newContent = newContent.SetAt(h, newFirstNode);
-            
-            return new DbSet<T>(newContent, _temporaryContent, newIndexes, StableId, Transaction, _oplog);
+            {
+                newTemporaryContent = _temporaryContent.Remove(hashValue);
+            }
         }
         else
-            return this;
-    }
-
-    private HashCollisionNode<T>? RemoveFromChain(HashCollisionNode<T> firstNode, T key)
-    {
-        if (firstNode.Value.Equals(key))
-            return firstNode.Next;
-
-        var currentNode = firstNode;
-        while (currentNode.Next != null)
         {
-            if (currentNode.Next.Value.Equals(key))
+            var currentNode = Content.GetAt(hashValue);
+            while (currentNode != null && !(currentNode.Value.Equals(key)))
             {
-                currentNode = new HashCollisionNode<T>(currentNode.Value, currentNode.Next.Next);
-                return firstNode;
+                nodesToCopy.Add(currentNode);
+                currentNode = currentNode.Next;
             }
-            currentNode = currentNode.Next;
+
+            if (currentNode != null)
+                if (nodesToCopy.Count == 0)
+                    newFirstNode = currentNode.Next;
+                else
+                {
+                    int currentIndex = nodesToCopy.Count - 1;
+                    var nextNode = currentNode.Next;
+                    while (currentIndex >= 0)
+                    {
+                        var oldNode = nodesToCopy.ElementAt(currentIndex);
+                        nextNode = new HashCollisionNode<T>(oldNode.Value, nextNode);
+                        currentIndex--;
+                    }
+
+                    newFirstNode = nextNode;
+                }
+
+            if (newFirstNode != null)
+                newContent = Content.SetAt(hashValue, newFirstNode);
+            else
+                newContent = Content.RemoveAt(hashValue);
         }
-
-        return firstNode;
+        
+        var newOplog = _oplog.Add(new KeyValuePair<string, T>("RemoveAt", key));
+            
+        return new DbSet<T>(
+            newContent, 
+            Count - 1, 
+            newTemporaryContent, 
+            Indexes, 
+            StableId, 
+            Transaction, 
+            newOplog);
     }
-
+    
     public DbSet<T> ConcurrentUpdate(DbSet<T> currentRoot)
     {
         var newSet = currentRoot;
         foreach (var op in _oplog)
         {
-            newSet = op(newSet);
+            if (op.Key == "Add")
+                newSet = newSet.Add(op.Value);
+            else if (op.Key == "Remove")
+                newSet = newSet.RemoveAt(op.Value);
         }
         return newSet;
     }
@@ -266,19 +313,19 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         {
             foreach (var item in _temporaryContent)
             {
-                if (item is Atom valueAtom)
+                if (item.Value is Atom valueAtom)
                     valueAtom.Save();
 
                 var h = StableHash(item);
                 if (Content.Has(h))
                 {
                     var node = Content.GetAt(h);
-                    var newNode = new HashCollisionNode<T>(item, node);
+                    var newNode = new HashCollisionNode<T>(item.Value.Value, node);
                     Content = Content.SetAt(h, newNode);
                 }
                 else
                 {
-                    var newNode = new HashCollisionNode<T>(item);
+                    var newNode = new HashCollisionNode<T>(item.Value.Value);
                     Content = Content.SetAt(h, newNode);
                 }
             }
@@ -347,7 +394,7 @@ public class DbSet<T> : DbCollection, IEnumerable<T>
         }
 
         foreach (var item in _temporaryContent)
-            yield return item;
+            yield return item.Value.Value;
     }
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
