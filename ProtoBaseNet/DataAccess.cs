@@ -603,6 +603,16 @@ namespace ProtoBaseNet
             }
         }
 
+        public void EnsureStableRoot(string rootName)
+        {
+            // TODO check previous value has not been changed at commit
+        }
+        
+        public void EnsureStableMutable(MutableObject mutableToCheck)
+        {
+            // TODO check previous value has not been changed at commit
+        }
+
         /// <summary>
         /// Commits the changes made in this transaction to the database.
         /// If this is a nested transaction, changes are merged into the parent transaction.
