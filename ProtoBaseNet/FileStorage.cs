@@ -50,6 +50,7 @@ namespace ProtoBaseNet
             {
                 using (var stream = new FileStream(_filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
                 {
+                    // ... (la lógica para leer el _currentRoot no cambia) ...
                     if (stream.Length > RootSize)
                     {
                         var rootBytes = new byte[RootSize];
@@ -70,16 +71,31 @@ namespace ProtoBaseNet
                         _currentRoot = new AtomPointer(Guid.Empty, 0);
                     }
 
+                    // --- LÓGICA DE ARRANQUE MODIFICADA ---
                     var fileLength = stream.Length;
-                    _currentPageNumber = (int)((fileLength - RootSize) / _pageSize);
-                    _currentPageOffset = (int)((fileLength - RootSize) % _pageSize);
+                    if (fileLength <= _pageSize)
+                    {
+                        // El archivo solo tiene la página del root, así que empezamos en la página 1.
+                        _currentPageNumber = (HeaderGap + pageSize) / pageSize;
+                    }
+                    else
+                    {
+                        // El índice de la última página con datos es (fileLength - 1) / pageSize.
+                        // La nueva página actual es la siguiente.
+                        var lastPageIndex = (int)((fileLength - 1) / _pageSize);
+                        _currentPageNumber = lastPageIndex + 1;
+                    }
+
+                    // Siempre empezamos al inicio de una página nueva.
+                    _currentPageOffset = 0;
                 }
             }
             else
             {
+                // La lógica para un archivo nuevo ya era correcta al empezar en la página 1.
                 _currentRoot = new AtomPointer(Guid.Empty, 0);
-                _currentPageNumber = HeaderGap / _pageSize;
-                _currentPageOffset = HeaderGap % _pageSize;
+                _currentPageNumber = (HeaderGap + pageSize) / pageSize;
+                _currentPageOffset = 0;
                 FlushRootInternal();
             }
             
